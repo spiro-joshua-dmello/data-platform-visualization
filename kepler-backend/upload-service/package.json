@@ -1,0 +1,19 @@
+{
+  "name": "upload-service",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/papaparse": "^5.5.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.9",
+    "hono": "^4.11.10",
+    "papaparse": "^5.5.3",
+    "postgres": "^3.4.8"
+  }
+}

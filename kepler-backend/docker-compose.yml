@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: kepler-postgis
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kepler
+    ports:
+      - "15432:5432"   # <— IMPORTANT: avoid conflicts with other postgres containers
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d
+
+  martin:
+    image: ghcr.io/maplibre/martin:v0.13.0
+    container_name: kepler-martin
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/kepler
+      RUST_LOG: info
+    ports:
+      - "3000:3000"
+    command: ["postgres://postgres:postgres@db:5432/kepler"]
+
+volumes:
+  pg_data:

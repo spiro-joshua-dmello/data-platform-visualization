@@ -1,0 +1,28 @@
+:root {
+  color-scheme: dark;
+  --panel: #111316;
+  --panel-2: #15181d;
+  --border: #232832;
+  --text: #e7eaf0;
+  --muted: #a5adbb;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  color: var(--text);
+  background: #0b0d10;
+}
+
+button, input, select {
+  font: inherit;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
