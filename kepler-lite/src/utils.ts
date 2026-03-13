@@ -1,5 +1,3 @@
-// src/util.ts
-
 export function uid() {
   return crypto.randomUUID();
 }
@@ -17,23 +15,37 @@ export function rgba(
 }
 
 /**
- * Compute bounds from CSV point rows
+ * Compute bounds from CSV point rows.
+ * Tries common latitude/longitude field names.
  */
 export function computeLonLatBoundsPoints(
   rows: any[]
 ): [number, number, number, number] | null {
-  let minLng = Infinity,
-    minLat = Infinity,
-    maxLng = -Infinity,
-    maxLat = -Infinity;
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
 
   let count = 0;
 
-  for (const r of rows) {
-    const lat = Number(r.lat);
-    const lng = Number(r.lng);
+  for (const r of rows ?? []) {
+    const lat = Number(
+      r?.lat ??
+        r?.latitude ??
+        r?.y ??
+        r?.location_latitude
+    );
+
+    const lng = Number(
+      r?.lng ??
+        r?.lon ??
+        r?.longitude ??
+        r?.x ??
+        r?.location_longitude
+    );
 
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) continue;
 
     count++;
     minLng = Math.min(minLng, lng);
@@ -48,49 +60,81 @@ export function computeLonLatBoundsPoints(
 }
 
 /**
- * Compute bounds from GeoJSON
+ * Compute bounds from GeoJSON.
+ * Handles FeatureCollection, Feature, Geometry, and GeometryCollection.
  */
 export function computeBoundsGeoJSON(
   geojson: any
 ): [number, number, number, number] | null {
   if (!geojson) return null;
 
-  let minLng = Infinity,
-    minLat = Infinity,
-    maxLng = -Infinity,
-    maxLat = -Infinity;
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
 
-  const scan = (coords: any) => {
-    if (typeof coords[0] === "number") {
-      const [lng, lat] = coords;
+  const visitCoords = (coords: any) => {
+    if (!Array.isArray(coords)) return;
+
+    if (
+      coords.length >= 2 &&
+      typeof coords[0] === "number" &&
+      typeof coords[1] === "number"
+    ) {
+      const lng = Number(coords[0]);
+      const lat = Number(coords[1]);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+
       minLng = Math.min(minLng, lng);
       minLat = Math.min(minLat, lat);
       maxLng = Math.max(maxLng, lng);
       maxLat = Math.max(maxLat, lat);
-    } else {
-      coords.forEach(scan);
+      return;
     }
+
+    for (const item of coords) {
+      visitCoords(item);
+    }
+  };
+
+  const visitGeometry = (geometry: any) => {
+    if (!geometry || typeof geometry !== "object") return;
+
+    if (geometry.type === "GeometryCollection") {
+      for (const g of geometry.geometries ?? []) {
+        visitGeometry(g);
+      }
+      return;
+    }
+
+    visitCoords(geometry.coordinates);
   };
 
   try {
     if (geojson.type === "FeatureCollection") {
-      geojson.features.forEach((f: any) => scan(f.geometry.coordinates));
+      for (const feature of geojson.features ?? []) {
+        visitGeometry(feature?.geometry);
+      }
     } else if (geojson.type === "Feature") {
-      scan(geojson.geometry.coordinates);
+      visitGeometry(geojson.geometry);
     } else {
-      scan(geojson.coordinates);
+      visitGeometry(geojson);
     }
   } catch {
     return null;
   }
 
-  if (!isFinite(minLng)) return null;
+  if (!Number.isFinite(minLng) || !Number.isFinite(minLat)) {
+    return null;
+  }
 
   return [minLng, minLat, maxLng, maxLat];
 }
 
 /**
- * Convert bounds → view state
+ * Convert bounds to a simple view state.
  */
 export function boundsToViewState(
   bounds: [number, number, number, number]
@@ -100,8 +144,8 @@ export function boundsToViewState(
   const longitude = (minLng + maxLng) / 2;
   const latitude = (minLat + maxLat) / 2;
 
-  const lngDiff = Math.abs(maxLng - minLng);
-  const latDiff = Math.abs(maxLat - minLat);
+  const lngDiff = Math.max(Math.abs(maxLng - minLng), 0.0001);
+  const latDiff = Math.max(Math.abs(maxLat - minLat), 0.0001);
   const maxDiff = Math.max(lngDiff, latDiff);
 
   const zoom =
@@ -117,7 +161,12 @@ export function boundsToViewState(
     maxDiff > 0.12 ? 11 :
     maxDiff > 0.06 ? 12 :
     maxDiff > 0.03 ? 13 :
-    14;
+    maxDiff > 0.015 ? 14 :
+    15;
 
-  return { longitude, latitude, zoom };
+  return {
+    longitude,
+    latitude,
+    zoom,
+  };
 }

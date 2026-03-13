@@ -1,24 +1,14 @@
 import { create } from "zustand";
-import type { Dataset, LayerConfig } from "./types";
-
-import {
-  computeLonLatBoundsPoints,
-  computeBoundsGeoJSON,
-  boundsToViewState,
-} from "./utils.ts";
-
-type ViewState = {
-  longitude: number;
-  latitude: number;
-  zoom: number;
-  pitch: number;
-  bearing: number;
-};
+import type { Dataset, LayerConfig, ViewState, Bounds } from "./types";
+import { boundsToViewState } from "./utils";
 
 type AppState = {
   datasets: Dataset[];
   layers: LayerConfig[];
   viewState: ViewState;
+
+  uploadOpen: boolean;
+  setUploadOpen: (open: boolean) => void;
 
   addDataset: (d: Dataset) => void;
   removeDataset: (id: string) => void;
@@ -29,7 +19,7 @@ type AppState = {
 
   setViewState: (patch: Partial<ViewState>) => void;
 
-  zoomToLayer: (layerId: string) => void; // ✅ NEW
+  zoomToLayer: (layerId: string) => void;
 };
 
 export const useAppStore = create<AppState>((set) => ({
@@ -44,8 +34,13 @@ export const useAppStore = create<AppState>((set) => ({
     bearing: 0,
   },
 
+  uploadOpen: true,
+  setUploadOpen: (open) => set({ uploadOpen: open }),
+
   addDataset: (d) =>
-    set((s) => ({ datasets: [d, ...s.datasets] })),
+    set((s) => ({
+      datasets: [d, ...s.datasets.filter((existing) => existing.id !== d.id)],
+    })),
 
   removeDataset: (id) =>
     set((s) => ({
@@ -54,13 +49,13 @@ export const useAppStore = create<AppState>((set) => ({
     })),
 
   addLayer: (l) =>
-    set((s) => ({ layers: [l, ...s.layers] })),
+    set((s) => ({
+      layers: [l, ...s.layers.filter((existing) => existing.id !== l.id)],
+    })),
 
   updateLayer: (id, patch) =>
     set((s) => ({
-      layers: s.layers.map((l) =>
-        l.id === id ? { ...l, ...patch } : l
-      ),
+      layers: s.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
     })),
 
   removeLayer: (id) =>
@@ -73,33 +68,26 @@ export const useAppStore = create<AppState>((set) => ({
       viewState: { ...s.viewState, ...patch },
     })),
 
-  /**
-   * 🔍 Zoom map to layer extent
-   */
   zoomToLayer: (layerId) =>
     set((state) => {
-      const layer = state.layers.find(l => l.id === layerId);
+      const layer = state.layers.find((l) => l.id === layerId);
       if (!layer) return state;
 
-      const dataset = state.datasets.find(d => d.id === layer.datasetId);
+      const dataset = state.datasets.find((d) => d.id === layer.datasetId);
       if (!dataset) return state;
 
-      let bounds: [number, number, number, number] | null = null;
-
-      if (dataset.type === "geojson") {
-        bounds = computeBoundsGeoJSON(dataset.data);
-      }
-
-      if (dataset.type === "csv-points") {
-        bounds = computeLonLatBoundsPoints(dataset.data);
-      }
-
+      const bounds: Bounds | null = dataset.bounds ?? null;
       if (!bounds) return state;
 
       const view = boundsToViewState(bounds);
 
       return {
-        viewState: { ...state.viewState, ...view },
+        viewState: {
+          ...state.viewState,
+          ...view,
+          pitch: 0,
+          bearing: 0,
+        },
       };
     }),
 }));

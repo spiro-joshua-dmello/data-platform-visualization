@@ -6,6 +6,7 @@ function rgbToHex([r, g, b]: [number, number, number]) {
   const h = (n: number) => n.toString(16).padStart(2, "0");
   return `#${h(r)}${h(g)}${h(b)}`;
 }
+
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace("#", "");
   const r = parseInt(clean.slice(0, 2), 16);
@@ -30,6 +31,16 @@ export function LayerPanel() {
         <div style={{ display: "grid", gap: 10 }}>
           {layers.map((l) => {
             const ds = datasets.find((d) => d.id === l.datasetId);
+
+            const allowedLayerTypes =
+              ds?.renderType === "point"
+                ? ["circle"]
+                : ds?.renderType === "line"
+                ? ["line"]
+                : ds?.renderType === "polygon"
+                ? ["fill", "line"]
+                : ["circle", "line", "fill"];
+
             return (
               <div
                 key={l.id}
@@ -43,15 +54,44 @@ export function LayerPanel() {
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 650 }}>{l.name}</div>
-                    <div style={{ fontSize: 12, color: "#a5adbb" }}>
-                      {l.kind} · {ds?.name ?? "unknown"}
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 650,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                      title={l.name}
+                    >
+                      {l.name}
                     </div>
+
+                    <div style={{ fontSize: 12, color: "#a5adbb" }}>
+                      {l.type} · {ds?.name ?? "unknown dataset"}
+                    </div>
+
+                    {ds && (
+                      <div style={{ fontSize: 12, color: "#a5adbb" }}>
+                        dataset type: {ds.type}
+                      </div>
+                    )}
+
+                    {ds?.renderType && (
+                      <div style={{ fontSize: 12, color: "#a5adbb" }}>
+                        render type: {ds.renderType}
+                      </div>
+                    )}
+
+                    {"datasetId" in (ds ?? {}) && ds?.datasetId && (
+                      <div style={{ fontSize: 12, color: "#a5adbb" }}>
+                        dataset_id: {ds.datasetId}
+                      </div>
+                    )}
                   </div>
 
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => zoomToLayer(l.id)}>🔍 Zoom</button>
+                  <div style={{ display: "flex", gap: 6, alignItems: "start" }}>
+                    <button onClick={() => zoomToLayer(l.id)}>Zoom</button>
                     <button onClick={() => removeLayer(l.id)}>Delete</button>
                   </div>
                 </div>
@@ -66,6 +106,22 @@ export function LayerPanel() {
                 </label>
 
                 <label style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontSize: 12, color: "#a5adbb" }}>Layer type</div>
+                  <select
+                    value={l.type}
+                    onChange={(e) =>
+                      updateLayer(l.id, {
+                        type: e.target.value as "circle" | "line" | "fill",
+                      })
+                    }
+                  >
+                    {allowedLayerTypes.includes("circle") && <option value="circle">circle</option>}
+                    {allowedLayerTypes.includes("line") && <option value="line">line</option>}
+                    {allowedLayerTypes.includes("fill") && <option value="fill">fill</option>}
+                  </select>
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
                   <div style={{ fontSize: 12, color: "#a5adbb" }}>Color</div>
                   <input
                     type="color"
@@ -75,42 +131,20 @@ export function LayerPanel() {
                 </label>
 
                 <label style={{ display: "grid", gap: 6 }}>
-                  <div style={{ fontSize: 12, color: "#a5adbb" }}>Opacity</div>
+                  <div style={{ fontSize: 12, color: "#a5adbb" }}>
+                    Opacity: {l.opacity.toFixed(2)}
+                  </div>
                   <input
                     type="range"
                     min={0}
                     max={1}
                     step={0.01}
                     value={l.opacity}
-                    onChange={(e) => updateLayer(l.id, { opacity: clamp(Number(e.target.value), 0, 1) })}
+                    onChange={(e) =>
+                      updateLayer(l.id, { opacity: clamp(Number(e.target.value), 0, 1) })
+                    }
                   />
                 </label>
-
-                {l.kind === "points" && (
-                  <label style={{ display: "grid", gap: 6 }}>
-                    <div style={{ fontSize: 12, color: "#a5adbb" }}>Radius (meters)</div>
-                    <input
-                      type="range"
-                      min={1}
-                      max={200}
-                      value={l.radius}
-                      onChange={(e) => updateLayer(l.id, { radius: Number(e.target.value) })}
-                    />
-                  </label>
-                )}
-
-                {l.kind === "geojson" && (
-                  <label style={{ display: "grid", gap: 6 }}>
-                    <div style={{ fontSize: 12, color: "#a5adbb" }}>Line width</div>
-                    <input
-                      type="range"
-                      min={1}
-                      max={10}
-                      value={l.lineWidth}
-                      onChange={(e) => updateLayer(l.id, { lineWidth: Number(e.target.value) })}
-                    />
-                  </label>
-                )}
               </div>
             );
           })}

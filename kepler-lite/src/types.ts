@@ -1,26 +1,32 @@
-export type DatasetType = "geojson" | "csv-points";
+export type Bounds = [number, number, number, number];
+
+export type DatasetType = "vector-tile";
+export type LayerType = "circle" | "line" | "fill";
+export type RenderType = "point" | "line" | "polygon" | "mixed";
 
 export type Dataset = {
   id: string;
   name: string;
   type: DatasetType;
-  // geojson: FeatureCollection, csv-points: rows [{lat,lng,...}]
-  data: any;
-  createdAt: string;
+  datasetId: string;
+  renderType?: RenderType;
+  bounds?: Bounds | null;
 };
-
-export type LayerKind = "geojson" | "points" | "heatmap" | "hex";
 
 export type LayerConfig = {
   id: string;
   datasetId: string;
   name: string;
-  kind: LayerKind;
+  type: LayerType;
   visible: boolean;
+  opacity: number;
+  color: [number, number, number];
+};
 
-  // style
-  opacity: number; // 0..1
-  color: [number, number, number]; // rgb
-  radius: number; // meters (for points)
-  lineWidth: number; // pixels (for geojson strokes)
+export type ViewState = {
+  longitude: number;
+  latitude: number;
+  zoom: number;
+  pitch: number;
+  bearing: number;
 };

@@ -1,71 +1,213 @@
-import React, { useMemo } from "react";
+import React from "react";
 import DeckGL from "@deck.gl/react";
-import Map from "react-map-gl/maplibre";
-import { GeoJsonLayer, ScatterplotLayer } from "deck.gl";
+import Map, { Source, Layer } from "react-map-gl/maplibre";
 import { useAppStore } from "./store";
-import { rgba } from "./utils";
 
-const BASEMAP = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+const BASEMAP =
+  "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+
+const POINTS_TILES = "http://localhost:3000/points/{z}/{x}/{y}";
+const LINES_TILES = "http://localhost:3000/lines/{z}/{x}/{y}";
+const POLYGONS_TILES = "http://localhost:3000/polygons/{z}/{x}/{y}";
+
+function rgbToCss([r, g, b]: [number, number, number]) {
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 export function MapView() {
   const { datasets, layers, viewState, setViewState } = useAppStore();
 
-  const deckLayers = useMemo(() => {
-    return layers
-      .filter((l) => l.visible)
-      .map((l) => {
-        const ds = datasets.find((d) => d.id === l.datasetId);
-        if (!ds) return null;
-
-        const fill = rgba(l.color, l.opacity);
-
-        if (l.kind === "geojson" && ds.type === "geojson") {
-          return new GeoJsonLayer({
-            id: l.id,
-            data: ds.data,
-            pickable: true,
-            filled: true,
-            stroked: true,
-            getFillColor: fill,
-            getLineColor: fill,
-            lineWidthMinPixels: l.lineWidth,
-            autoHighlight: true,
-          });
-        }
-
-        if (l.kind === "points" && ds.type === "csv-points") {
-          return new ScatterplotLayer({
-            id: l.id,
-            data: ds.data,
-            pickable: true,
-            getPosition: (d: any) => [Number(d.lng), Number(d.lat)],
-            getFillColor: fill,
-            radiusUnits: "meters",
-            getRadius: () => l.radius,
-            autoHighlight: true,
-          });
-        }
-
-        return null;
-      })
-      .filter(Boolean);
-  }, [datasets, layers]);
+  const vectorDatasets = datasets.filter((d) => d.type === "vector-tile");
 
   return (
     <DeckGL
       viewState={viewState as any}
       controller={true}
-      layers={deckLayers as any}
       onViewStateChange={({ viewState: vs }: any) => setViewState(vs)}
-      getTooltip={({ object }: any) =>
-        object
-          ? {
-              text: typeof object === "object" ? JSON.stringify(object, null, 2) : String(object),
-            }
-          : null
-      }
     >
-      <Map mapStyle={BASEMAP} />
+      <Map
+        reuseMaps={false}
+        mapStyle={BASEMAP}
+        onLoad={() => console.log("Map loaded")}
+        onError={(e) => console.error("MapLibre error:", e)}
+      >
+        <Source id="points-source" type="vector" tiles={[POINTS_TILES]} />
+        <Source id="lines-source" type="vector" tiles={[LINES_TILES]} />
+        <Source id="polygons-source" type="vector" tiles={[POLYGONS_TILES]} />
+
+        {vectorDatasets.flatMap((dataset) => {
+          const linkedLayers = layers.filter(
+            (l) => l.visible && l.datasetId === dataset.id
+          );
+
+          return linkedLayers.flatMap((layer) => {
+            const color = rgbToCss(layer.color);
+            const datasetFilter = [
+              "==",
+              ["get", "dataset_id"],
+              dataset.datasetId,
+            ] as any;
+
+            const lowZoomPreview = (
+              <Layer
+                key={`${layer.id}-preview`}
+                id={`${layer.id}-preview`}
+                type="circle"
+                source="points-source"
+                source-layer="points"
+                filter={datasetFilter}
+                minzoom={0}
+                maxzoom={6}
+                layout={{
+                  visibility: layer.visible ? "visible" : "none",
+                }}
+                paint={{
+                  "circle-color": color,
+                  "circle-opacity": Math.max(layer.opacity, 0.7),
+                  "circle-radius": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    0, 5,
+                    3, 6,
+                    6, 4,
+                  ],
+                  "circle-stroke-width": 1,
+                  "circle-stroke-color": "#ffffff",
+                }}
+              />
+            );
+
+            if (layer.type === "circle") {
+              return [
+                <Layer
+                  key={layer.id}
+                  id={layer.id}
+                  type="circle"
+                  source="points-source"
+                  source-layer="points"
+                  filter={datasetFilter}
+                  minzoom={0}
+                  maxzoom={24}
+                  layout={{
+                    visibility: layer.visible ? "visible" : "none",
+                  }}
+                  paint={{
+                    "circle-color": color,
+                    "circle-opacity": layer.opacity,
+                    "circle-radius": [
+                      "interpolate",
+                      ["linear"],
+                      ["zoom"],
+                      0, 5,
+                      4, 6,
+                      8, 7,
+                      12, 8,
+                      16, 10,
+                    ],
+                    "circle-stroke-width": 1,
+                    "circle-stroke-color": "#ffffff",
+                  }}
+                />,
+              ];
+            }
+
+            if (layer.type === "line") {
+              return [
+                lowZoomPreview,
+                <Layer
+                  key={layer.id}
+                  id={layer.id}
+                  type="line"
+                  source="lines-source"
+                  source-layer="lines"
+                  filter={datasetFilter}
+                  minzoom={6}
+                  maxzoom={24}
+                  layout={{
+                    visibility: layer.visible ? "visible" : "none",
+                    "line-cap": "round",
+                    "line-join": "round",
+                  }}
+                  paint={{
+                    "line-color": color,
+                    "line-opacity": layer.opacity,
+                    "line-width": [
+                      "interpolate",
+                      ["linear"],
+                      ["zoom"],
+                      6, 2,
+                      8, 2.5,
+                      12, 4,
+                      16, 6,
+                    ],
+                  }}
+                />,
+              ];
+            }
+
+            if (layer.type === "fill") {
+              return [
+                lowZoomPreview,
+                <Layer
+                  key={`${layer.id}-fill`}
+                  id={`${layer.id}-fill`}
+                  type="fill"
+                  source="polygons-source"
+                  source-layer="polygons"
+                  filter={datasetFilter}
+                  minzoom={6}
+                  maxzoom={24}
+                  layout={{
+                    visibility: layer.visible ? "visible" : "none",
+                  }}
+                  paint={{
+                    "fill-color": color,
+                    "fill-opacity": [
+                      "interpolate",
+                      ["linear"],
+                      ["zoom"],
+                      6, Math.min(layer.opacity, 0.25),
+                      10, Math.min(layer.opacity, 0.4),
+                      14, layer.opacity,
+                    ],
+                  }}
+                />,
+                <Layer
+                  key={`${layer.id}-outline`}
+                  id={`${layer.id}-outline`}
+                  type="line"
+                  source="polygons-source"
+                  source-layer="polygons"
+                  filter={datasetFilter}
+                  minzoom={6}
+                  maxzoom={24}
+                  layout={{
+                    visibility: layer.visible ? "visible" : "none",
+                    "line-cap": "round",
+                    "line-join": "round",
+                  }}
+                  paint={{
+                    "line-color": color,
+                    "line-opacity": 1,
+                    "line-width": [
+                      "interpolate",
+                      ["linear"],
+                      ["zoom"],
+                      6, 1.5,
+                      8, 2,
+                      12, 3,
+                      16, 4,
+                    ],
+                  }}
+                />,
+              ];
+            }
+
+            return [];
+          });
+        })}
+      </Map>
     </DeckGL>
   );
 }
