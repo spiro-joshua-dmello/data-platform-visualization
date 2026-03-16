@@ -1,0 +1,45 @@
+# Martin tile server config
+# Mount this as /config.yaml inside the martin container
+
+postgres:
+  connection_string: postgres://postgres:postgres@db:5432/kepler
+
+tables:
+  points:
+    schema: public
+    table: points
+    srid: 4326
+    geometry_column: geom
+    minzoom: 0
+    maxzoom: 24
+    buffer: 64
+    extent: 4096
+    clip_geom: false
+    properties:
+      dataset_id: text
+
+  lines:
+    schema: public
+    table: lines
+    srid: 4326
+    geometry_column: geom
+    minzoom: 0
+    maxzoom: 24
+    buffer: 64
+    extent: 4096
+    clip_geom: false
+    properties:
+      dataset_id: text
+
+  polygons:
+    schema: public
+    table: polygons
+    srid: 4326
+    geometry_column: geom
+    minzoom: 0
+    maxzoom: 24
+    buffer: 64
+    extent: 4096
+    clip_geom: false
+    properties:
+      dataset_id: text
