@@ -10,11 +10,13 @@ tables:
     table: points
     srid: 4326
     geometry_column: geom
+    id_column: id
     minzoom: 0
     maxzoom: 24
     buffer: 64
     extent: 4096
     clip_geom: false
+    geometry_type: POINT
     properties:
       dataset_id: text
 
@@ -23,11 +25,13 @@ tables:
     table: lines
     srid: 4326
     geometry_column: geom
+    id_column: id
     minzoom: 0
     maxzoom: 24
     buffer: 64
     extent: 4096
     clip_geom: false
+    geometry_type: LINESTRING
     properties:
       dataset_id: text
 
@@ -36,10 +40,13 @@ tables:
     table: polygons
     srid: 4326
     geometry_column: geom
+    id_column: id
     minzoom: 0
     maxzoom: 24
-    buffer: 64
+    buffer: 256        # increase from 64
     extent: 4096
     clip_geom: false
+    geometry_type: MULTIPOLYGON
+    simplify_until: 100  # disable simplification entirely
     properties:
       dataset_id: text

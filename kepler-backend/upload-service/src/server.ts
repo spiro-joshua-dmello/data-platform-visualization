@@ -3,24 +3,38 @@ import { serve } from "@hono/node-server";
 import postgres from "postgres";
 import Papa from "papaparse";
 import { cors } from "hono/cors";
+import { createWriteStream, createReadStream, existsSync } from "fs";
+import { mkdir, readFile } from "fs/promises";
+import { join } from "path";
+import { pipeline } from "stream/promises";
+
+// Replace with:
+const { chain } = require("stream-chain");
+const { parser } = require("stream-json");
+const { pick } = require("stream-json/filters/Pick");
+const { streamArray } = require("stream-json/streamers/StreamArray");
 
 const PORT = Number(process.env.PORT ?? 8787);
 
 const DATABASE_URL =
   process.env.DATABASE_URL ??
-  "postgres://postgres:postgres@localhost:55433/kepler";
+  "postgres://postgres:postgres@localhost:15432/kepler";
 
 const MARTIN_BASE = process.env.MARTIN_BASE ?? "http://localhost:3000";
 
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES ?? 50 * 1024 * 1024);
 const MAX_FEATURES = Number(process.env.MAX_FEATURES ?? 200000);
 const MAX_CSV_ROWS = Number(process.env.MAX_CSV_ROWS ?? 500000);
+const TEMP_DIR = process.env.TEMP_DIR ?? "/tmp/kepler-uploads";
 
 const sql = postgres(DATABASE_URL, {
   idle_timeout: 20,
   max: 10,
   onnotice: () => {},
 });
+
+// Ensure temp dir exists
+await mkdir(TEMP_DIR, { recursive: true });
 
 const app = new Hono();
 
@@ -49,7 +63,9 @@ app.onError((err, c) => {
   );
 });
 
-app.get("/", (c) => c.text("Upload service OK. Try GET /health or POST /datasets/upload"));
+app.get("/", (c) =>
+  c.text("Upload service OK. Try GET /health or POST /datasets/upload")
+);
 
 app.get("/health", async (c) => {
   let dbOk = false;
@@ -87,6 +103,8 @@ app.get("/health", async (c) => {
 console.log("DATABASE_URL =", DATABASE_URL);
 console.log("SERVER FILE =", import.meta.url);
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 function stripUtf8Bom(s: string) {
   return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
 }
@@ -95,20 +113,8 @@ function pickCsvSuggestions(fields: string[]) {
   const findMatch = (candidates: string[]) =>
     fields.find((f) => candidates.includes(f.toLowerCase())) ?? null;
 
-  const latColumn = findMatch([
-    "lat",
-    "latitude",
-    "location_latitude",
-    "y",
-  ]);
-
-  const lngColumn = findMatch([
-    "lng",
-    "lon",
-    "longitude",
-    "location_longitude",
-    "x",
-  ]);
+  const latColumn = findMatch(["lat", "latitude", "location_latitude", "y"]);
+  const lngColumn = findMatch(["lng", "lon", "longitude", "location_longitude", "x"]);
 
   return { latColumn, lngColumn };
 }
@@ -199,16 +205,17 @@ function getTargetTable(type: string) {
   return null;
 }
 
-function badRequest(code: string, error: string, extra: Record<string, unknown> = {}) {
-  return {
-    ok: false,
-    code,
-    error,
-    ...extra,
-  };
+function badRequest(
+  code: string,
+  error: string,
+  extra: Record<string, unknown> = {}
+) {
+  return { ok: false, code, error, ...extra };
 }
 
-async function getDatasetBounds(datasetId: string): Promise<[number, number, number, number] | null> {
+async function getDatasetBounds(
+  datasetId: string
+): Promise<[number, number, number, number] | null> {
   const rows = await sql.unsafe(
     `
     SELECT
@@ -231,21 +238,170 @@ async function getDatasetBounds(datasetId: string): Promise<[number, number, num
   );
 
   const row = rows?.[0];
-  if (!row || row.minx == null || row.miny == null || row.maxx == null || row.maxy == null) {
+  if (
+    !row ||
+    row.minx == null ||
+    row.miny == null ||
+    row.maxx == null ||
+    row.maxy == null
+  ) {
     return null;
   }
 
-  return [
-    Number(row.minx),
-    Number(row.miny),
-    Number(row.maxx),
-    Number(row.maxy),
-  ];
+  return [Number(row.minx), Number(row.miny), Number(row.maxx), Number(row.maxy)];
 }
 
-// -----------------------------
-// Inspect route
-// -----------------------------
+// ── Streaming GeoJSON → Postgres ─────────────────────────────────────────────
+
+async function streamGeoJSONIntoDB(
+  filePath: string,
+  datasetId: string
+): Promise<{ inserted: number; geomTypes: Set<string> }> {
+  const { chain } = require("stream-chain");
+  const { parser } = require("stream-json");
+  const { pick } = require("stream-json/filters/Pick");
+  const { streamArray } = require("stream-json/streamers/StreamArray");
+  const geomTypes = new Set<string>();
+  let inserted = 0;
+  const BATCH_SIZE = 500;
+  let batch: { table: string; geom: any; props: any }[] = [];
+
+  const flushBatch = async (tx: any) => {
+    for (const { table, geom, props } of batch) {
+      await tx.unsafe(
+        `INSERT INTO ${table} (dataset_id, geom, props)
+         VALUES (
+           $1,
+           ST_SetSRID(
+             CASE
+               WHEN $4 IN ('Polygon', 'MultiPolygon') THEN ST_Multi(ST_GeomFromGeoJSON($2))
+               ELSE ST_GeomFromGeoJSON($2)
+             END,
+             4326
+           ),
+           $3::jsonb
+         )`,
+        [datasetId, JSON.stringify(geom), JSON.stringify(props), geom.type]
+      );
+      inserted++;
+    }
+    batch = [];
+  };
+
+  // Peek at first 300 bytes to detect FeatureCollection vs bare array
+  const headBuf = Buffer.alloc(300);
+  const fd = await import("fs/promises").then(m => m.open(filePath, "r"));
+  await fd.read(headBuf, 0, 300, 0);
+  await fd.close();
+  const head = headBuf.toString("utf8");
+  const isFeatureCollection = /"type"\s*:\s*"FeatureCollection"/.test(head);
+
+  await sql.begin(async (tx) => {
+    await new Promise<void>((resolve, reject) => {
+      const pipeline = isFeatureCollection
+        ? chain([
+            createReadStream(filePath, { encoding: "utf8" }),
+            parser(),
+            pick({ filter: "features" }),
+            streamArray(),
+          ])
+        : chain([
+            createReadStream(filePath, { encoding: "utf8" }),
+            parser(),
+            streamArray(),
+          ]);
+
+      pipeline.on("data", async ({ value: feature }: any) => {
+        pipeline.pause();
+        try {
+          const geom =
+            feature?.geometry ??
+            (feature?.type && feature?.coordinates ? feature : null);
+
+          if (!geom?.type) { pipeline.resume(); return; }
+
+          const table = getTargetTable(geom.type);
+          if (!table) { pipeline.resume(); return; }
+
+          geomTypes.add(geom.type);
+          const props = { ...(feature.properties ?? {}), dataset_id: datasetId };
+          batch.push({ table, geom, props });
+
+          if (batch.length >= BATCH_SIZE) await flushBatch(tx);
+        } catch (err) {
+          reject(err);
+          return;
+        }
+        pipeline.resume();
+      });
+
+      pipeline.on("end", async () => {
+        try {
+          if (batch.length > 0) await flushBatch(tx);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+
+      pipeline.on("error", reject);
+    });
+  });
+
+  return { inserted, geomTypes };
+}
+
+// ── Streaming CSV → Postgres ──────────────────────────────────────────────────
+
+async function streamCSVIntoDB(
+  filePath: string,
+  datasetId: string,
+  latColumn: string,
+  lngColumn: string
+): Promise<{ inserted: number; skipped: number }> {
+  let inserted = 0;
+  let skipped = 0;
+
+  const text = stripUtf8Bom(await readFile(filePath, "utf8"));
+  const parsed = Papa.parse(text, {
+    header: true,
+    dynamicTyping: true,
+    skipEmptyLines: true,
+  });
+
+  const rows = parsed.data as any[];
+
+  await sql.begin(async (tx) => {
+    for (const r of rows) {
+      const lat = Number(r[latColumn]);
+      const lng = Number(r[lngColumn]);
+
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        lat < -90 ||
+        lat > 90 ||
+        lng < -180 ||
+        lng > 180
+      ) {
+        skipped++;
+        continue;
+      }
+
+      await tx.unsafe(
+        `INSERT INTO points (dataset_id, geom, props)
+         VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4::jsonb)`,
+        [datasetId, lng, lat, JSON.stringify({ ...r, dataset_id: datasetId })]
+      );
+      inserted++;
+    }
+  });
+
+  return { inserted, skipped };
+}
+
+// ── Inspect route ─────────────────────────────────────────────────────────────
+
 app.post("/datasets/inspect", async (c) => {
   const body = await c.req.parseBody();
   const file = body["file"];
@@ -254,24 +410,14 @@ app.post("/datasets/inspect", async (c) => {
     return c.json(badRequest("FILE_REQUIRED", "file required"), 400);
   }
 
-  if (file.size > MAX_UPLOAD_BYTES) {
-    return c.json(
-      badRequest(
-        "FILE_TOO_LARGE",
-        `File too large. Maximum allowed size is ${Math.round(
-          MAX_UPLOAD_BYTES / (1024 * 1024)
-        )} MB.`,
-        {
-          maxBytes: MAX_UPLOAD_BYTES,
-          fileSize: file.size,
-        }
-      ),
-      413
-    );
-  }
+  // Only read first 2MB for inspection — enough to detect type/columns
+  const INSPECT_SAMPLE_BYTES = 2 * 1024 * 1024;
+  const sample = file.size > INSPECT_SAMPLE_BYTES
+    ? file.slice(0, INSPECT_SAMPLE_BYTES)
+    : file;
 
   const lower = file.name.toLowerCase();
-  const text = stripUtf8Bom(await file.text());
+  const text = stripUtf8Bom(await sample.text());
 
   if (lower.endsWith(".csv")) {
     const parsed = Papa.parse(text, {
@@ -306,24 +452,44 @@ app.post("/datasets/inspect", async (c) => {
 
   if (lower.endsWith(".geojson") || lower.endsWith(".json")) {
     try {
-      const json = JSON.parse(text);
-      const { features, noteType } = normalizeGeoJSONTopLevel(json);
-
-      if (!features.length) {
-        return c.json(
-          badRequest("INVALID_GEOJSON", "No features found or unsupported GeoJSON top-level.", {
-            detected: noteType,
-            topLevelType: json?.type ?? null,
-          }),
-          400
-        );
-      }
-
+      let json: any = null;
+      let noteType = "FeatureCollection";
+      let featureCount = 0;
       const geomTypes = new Set<string>();
 
-      for (const f of features.slice(0, 200)) {
-        const g = f?.geometry;
-        if (g?.type) geomTypes.add(g.type);
+      if (file.size <= INSPECT_SAMPLE_BYTES) {
+        // Small file — parse normally
+        json = JSON.parse(text);
+        const normalized = normalizeGeoJSONTopLevel(json);
+        noteType = normalized.noteType;
+        featureCount = normalized.features.length;
+        for (const f of normalized.features.slice(0, 200)) {
+          const g = f?.geometry;
+          if (g?.type) geomTypes.add(g.type);
+        }
+      } else {
+        // Large file — regex scan the sample for geometry types
+        const geomTypePattern = /"type"\s*:\s*"(Point|MultiPoint|LineString|MultiLineString|Polygon|MultiPolygon)"/g;
+        let match;
+        while ((match = geomTypePattern.exec(text)) !== null) {
+          geomTypes.add(match[1]);
+        }
+
+        // Estimate feature count by counting "type":"Feature" occurrences in full filename hint
+        // We can't know exactly without parsing, so we mark it as unknown
+        featureCount = -1; // signals "large file, count unknown"
+        noteType = "FeatureCollection";
+      }
+
+      if (geomTypes.size === 0) {
+        return c.json(
+          badRequest(
+            "INVALID_GEOJSON",
+            "No geometry types found. File may be empty or unsupported.",
+            { detected: noteType, topLevelType: json?.type ?? null }
+          ),
+          400
+        );
       }
 
       const geometryTypes = [...geomTypes];
@@ -334,8 +500,8 @@ app.post("/datasets/inspect", async (c) => {
         ok: true,
         fileType: "geojson",
         detected: noteType,
-        featureCount: features.length,
-        topLevelType: json?.type ?? null,
+        featureCount,
+        topLevelType: json?.type ?? "FeatureCollection",
         geometryTypes,
         suggestedLayerType,
         renderType,
@@ -354,9 +520,8 @@ app.post("/datasets/inspect", async (c) => {
   );
 });
 
-// -----------------------------
-// Upload route
-// -----------------------------
+// ── Upload route (small files ≤50MB, existing behaviour) ─────────────────────
+
 app.post("/datasets/upload", async (c) => {
   const startedAt = Date.now();
   const body = await c.req.parseBody();
@@ -364,20 +529,22 @@ app.post("/datasets/upload", async (c) => {
 
   if (!(file instanceof File)) {
     return c.json(
-      badRequest("FILE_REQUIRED", "file required (multipart field name must be 'file')"),
+      badRequest(
+        "FILE_REQUIRED",
+        "file required (multipart field name must be 'file')"
+      ),
       400
     );
   }
 
   if (file.size > MAX_UPLOAD_BYTES) {
-    return c.json(
-      badRequest("FILE_TOO_LARGE", "File too large."),
-      413
-    );
+    return c.json(badRequest("FILE_TOO_LARGE", "File too large."), 413);
   }
 
-  const latColumnInput = typeof body["latColumn"] === "string" ? body["latColumn"] : null;
-  const lngColumnInput = typeof body["lngColumn"] === "string" ? body["lngColumn"] : null;
+  const latColumnInput =
+    typeof body["latColumn"] === "string" ? body["latColumn"] : null;
+  const lngColumnInput =
+    typeof body["lngColumn"] === "string" ? body["lngColumn"] : null;
 
   const datasetId = crypto.randomUUID();
   const lower = file.name.toLowerCase();
@@ -389,26 +556,17 @@ app.post("/datasets/upload", async (c) => {
     try {
       json = JSON.parse(text);
     } catch {
-      return c.json(
-        badRequest("INVALID_JSON", "Invalid JSON"),
-        400
-      );
+      return c.json(badRequest("INVALID_JSON", "Invalid JSON"), 400);
     }
 
     const { features, noteType } = normalizeGeoJSONTopLevel(json);
 
     if (!features.length) {
-      return c.json(
-        badRequest("INVALID_GEOJSON", "No features found"),
-        400
-      );
+      return c.json(badRequest("INVALID_GEOJSON", "No features found"), 400);
     }
 
     if (features.length > MAX_FEATURES) {
-      return c.json(
-        badRequest("TOO_MANY_FEATURES", "Too many features"),
-        413
-      );
+      return c.json(badRequest("TOO_MANY_FEATURES", "Too many features"), 413);
     }
 
     let inserted = 0;
@@ -424,21 +582,22 @@ app.post("/datasets/upload", async (c) => {
 
         geomTypes.add(geom.type);
 
-        const props = {
-          ...(f.properties ?? {}),
-          dataset_id: datasetId,
-        };
+        const props = { ...(f.properties ?? {}), dataset_id: datasetId };
 
         await tx.unsafe(
-          `
-          INSERT INTO ${table} (dataset_id, geom, props)
-          VALUES (
-            $1,
-            ST_SetSRID(ST_GeomFromGeoJSON($2), 4326),
-            $3::jsonb
-          )
-          `,
-          [datasetId, JSON.stringify(geom), JSON.stringify(props)]
+          `INSERT INTO ${table} (dataset_id, geom, props)
+           VALUES (
+             $1,
+             ST_SetSRID(
+               CASE
+                 WHEN $4 IN ('Polygon', 'MultiPolygon') THEN ST_Multi(ST_GeomFromGeoJSON($2))
+                 ELSE ST_GeomFromGeoJSON($2)
+               END,
+               4326
+             ),
+             $3::jsonb
+           )`,
+          [datasetId, JSON.stringify(geom), JSON.stringify(props), geom.type]
         );
 
         inserted++;
@@ -466,9 +625,9 @@ app.post("/datasets/upload", async (c) => {
       suggestedLayerType,
       renderType,
       tiles: {
-        points: `${MARTIN_BASE}/table.public.points.geom/{z}/{x}/{y}`,
-        lines: `${MARTIN_BASE}/table.public.lines.geom/{z}/{x}/{y}`,
-        polygons: `${MARTIN_BASE}/table.public.polygons.geom/{z}/{x}/{y}`,
+        points: `${MARTIN_BASE}/points/{z}/{x}/{y}`,
+        lines: `${MARTIN_BASE}/lines/{z}/{x}/{y}`,
+        polygons: `${MARTIN_BASE}/polygons/{z}/{x}/{y}`,
       },
       processingMs: Date.now() - startedAt,
       detected: noteType,
@@ -495,17 +654,11 @@ app.post("/datasets/upload", async (c) => {
     const fields = parsed.meta.fields ?? [];
 
     if (!rows.length) {
-      return c.json(
-        badRequest("EMPTY_CSV", "Empty CSV"),
-        400
-      );
+      return c.json(badRequest("EMPTY_CSV", "Empty CSV"), 400);
     }
 
     if (rows.length > MAX_CSV_ROWS) {
-      return c.json(
-        badRequest("CSV_TOO_LARGE", "CSV too large"),
-        413
-      );
+      return c.json(badRequest("CSV_TOO_LARGE", "CSV too large"), 413);
     }
 
     const suggestions = pickCsvSuggestions(fields);
@@ -514,7 +667,10 @@ app.post("/datasets/upload", async (c) => {
 
     if (!latColumn || !lngColumn) {
       return c.json(
-        badRequest("CSV_COLUMNS_REQUIRED", "Latitude/Longitude columns not found"),
+        badRequest(
+          "CSV_COLUMNS_REQUIRED",
+          "Latitude/Longitude columns not found"
+        ),
         400
       );
     }
@@ -537,20 +693,11 @@ app.post("/datasets/upload", async (c) => {
           continue;
         }
 
-        const props = {
-          ...r,
-          dataset_id: datasetId,
-        };
+        const props = { ...r, dataset_id: datasetId };
 
         await tx.unsafe(
-          `
-          INSERT INTO points (dataset_id, geom, props)
-          VALUES (
-            $1,
-            ST_SetSRID(ST_MakePoint($2, $3), 4326),
-            $4::jsonb
-          )
-          `,
+          `INSERT INTO points (dataset_id, geom, props)
+           VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4::jsonb)`,
           [datasetId, lng, lat, JSON.stringify(props)]
         );
 
@@ -577,17 +724,220 @@ app.post("/datasets/upload", async (c) => {
       suggestedLayerType: "circle",
       renderType: "point",
       tiles: {
-        points: `${MARTIN_BASE}/table.public.points.geom/{z}/{x}/{y}`,
+        points: `${MARTIN_BASE}/points/{z}/{x}/{y}`,
       },
       processingMs: Date.now() - startedAt,
     });
   }
 
-  return c.json(
-    badRequest("UNSUPPORTED_FILE", "Unsupported file type"),
-    400
-  );
+  return c.json(badRequest("UNSUPPORTED_FILE", "Unsupported file type"), 400);
 });
+
+// ── Chunked upload: init ──────────────────────────────────────────────────────
+
+app.post("/datasets/upload/init", async (c) => {
+  const body = await c.req.json();
+  const { fileName, fileSize, totalChunks, latColumn, lngColumn } = body;
+
+  if (!fileName || !totalChunks) {
+    return c.json(
+      badRequest("INVALID_INIT", "fileName and totalChunks required"),
+      400
+    );
+  }
+
+  const uploadId = crypto.randomUUID();
+  const uploadDir = join(TEMP_DIR, uploadId);
+  await mkdir(uploadDir, { recursive: true });
+
+  await Bun.write(
+    join(uploadDir, "meta.json"),
+    JSON.stringify({ fileName, fileSize, totalChunks, latColumn, lngColumn })
+  );
+
+  console.log(
+    `[chunked] init uploadId=${uploadId} file=${fileName} chunks=${totalChunks}`
+  );
+
+  return c.json({ ok: true, uploadId });
+});
+
+// ── Chunked upload: receive chunk ─────────────────────────────────────────────
+
+app.post("/datasets/upload/chunk", async (c) => {
+  const body = await c.req.parseBody();
+  const uploadId = body["uploadId"] as string;
+  const chunkIndex = Number(body["chunkIndex"]);
+  const chunk = body["chunk"];
+
+  if (!uploadId || isNaN(chunkIndex) || !(chunk instanceof File)) {
+    return c.json(
+      badRequest("INVALID_CHUNK", "uploadId, chunkIndex, and chunk required"),
+      400
+    );
+  }
+
+  const uploadDir = join(TEMP_DIR, uploadId);
+  if (!existsSync(uploadDir)) {
+    return c.json(
+      badRequest("UNKNOWN_UPLOAD", "Upload session not found"),
+      404
+    );
+  }
+
+  const chunkPath = join(
+    uploadDir,
+    `chunk_${String(chunkIndex).padStart(6, "0")}`
+  );
+  await Bun.write(chunkPath, await chunk.arrayBuffer());
+
+  console.log(`[chunked] received chunk ${chunkIndex} for uploadId=${uploadId}`);
+
+  return c.json({ ok: true, chunkIndex });
+});
+
+// ── Chunked upload: finalize ──────────────────────────────────────────────────
+
+app.post("/datasets/upload/finalize", async (c) => {
+  const startedAt = Date.now();
+  const { uploadId } = await c.req.json();
+
+  if (!uploadId) {
+    return c.json(badRequest("INVALID_FINALIZE", "uploadId required"), 400);
+  }
+
+  const uploadDir = join(TEMP_DIR, uploadId);
+  if (!existsSync(uploadDir)) {
+    return c.json(
+      badRequest("UNKNOWN_UPLOAD", "Upload session not found"),
+      404
+    );
+  }
+
+  const meta = JSON.parse(
+    await Bun.file(join(uploadDir, "meta.json")).text()
+  );
+  const { fileName, totalChunks, latColumn, lngColumn } = meta;
+
+  console.log(
+    `[chunked] finalizing uploadId=${uploadId} file=${fileName} chunks=${totalChunks}`
+  );
+
+  // Assemble chunks into one file
+  const assembledPath = join(uploadDir, "assembled");
+  const writeStream = createWriteStream(assembledPath);
+
+  for (let i = 0; i < totalChunks; i++) {
+    const chunkPath = join(
+      uploadDir,
+      `chunk_${String(i).padStart(6, "0")}`
+    );
+    const readStream = createReadStream(chunkPath);
+    await pipeline(readStream, writeStream, { end: false });
+  }
+
+  writeStream.end();
+  await new Promise<void>((r) => writeStream.on("finish", r));
+
+  console.log(`[chunked] assembled ${fileName} at ${assembledPath}`);
+
+  const lower = fileName.toLowerCase();
+  const datasetId = crypto.randomUUID();
+
+  try {
+    if (lower.endsWith(".geojson") || lower.endsWith(".json")) {
+      const result = await streamGeoJSONIntoDB(assembledPath, datasetId);
+
+      if (result.inserted === 0) {
+        return c.json(
+          badRequest(
+            "NO_VALID_FEATURES",
+            "No valid features could be inserted."
+          ),
+          400
+        );
+      }
+
+      const geometryTypes = [...result.geomTypes];
+      const suggestedLayerType =
+        inferSuggestedLayerTypeFromGeomTypes(geometryTypes);
+      const renderType = inferDatasetRenderType(geometryTypes);
+      const bounds = await getDatasetBounds(datasetId);
+
+      return c.json({
+        ok: true,
+        datasetId,
+        inserted: result.inserted,
+        bounds,
+        geometryTypes,
+        suggestedLayerType,
+        renderType,
+        tiles: {
+          points: `${MARTIN_BASE}/points/{z}/{x}/{y}`,
+          lines: `${MARTIN_BASE}/lines/{z}/{x}/{y}`,
+          polygons: `${MARTIN_BASE}/polygons/{z}/{x}/{y}`,
+        },
+        processingMs: Date.now() - startedAt,
+      });
+    }
+
+    if (lower.endsWith(".csv")) {
+      if (!latColumn || !lngColumn) {
+        return c.json(
+          badRequest(
+            "CSV_COLUMNS_REQUIRED",
+            "latColumn and lngColumn are required for CSV uploads"
+          ),
+          400
+        );
+      }
+
+      const result = await streamCSVIntoDB(
+        assembledPath,
+        datasetId,
+        latColumn,
+        lngColumn
+      );
+
+      if (result.inserted === 0) {
+        return c.json(
+          badRequest(
+            "NO_VALID_COORDINATES",
+            "No valid coordinate rows found."
+          ),
+          400
+        );
+      }
+
+      const bounds = await getDatasetBounds(datasetId);
+
+      return c.json({
+        ok: true,
+        datasetId,
+        inserted: result.inserted,
+        skipped: result.skipped,
+        bounds,
+        geometryTypes: ["Point"],
+        suggestedLayerType: "circle",
+        renderType: "point",
+        tiles: {
+          points: `${MARTIN_BASE}/points/{z}/{x}/{y}`,
+        },
+        processingMs: Date.now() - startedAt,
+      });
+    }
+
+    return c.json(
+      badRequest("UNSUPPORTED_FILE", "Unsupported file type"),
+      400
+    );
+  } finally {
+    // Cleanup temp dir regardless of success/failure
+    Bun.spawn(["rm", "-rf", uploadDir]);
+  }
+});
+
+// ── Start server ──────────────────────────────────────────────────────────────
 
 serve({
   fetch: app.fetch,

@@ -62,6 +62,7 @@ export function MapView() {
 
             return linkedLayers.flatMap((layer) => {
               const color = rgbToCss(layer.color);
+              console.log("dataset keys:", dataset);
               const datasetFilter = [
                 "==",
                 ["get", "dataset_id"],

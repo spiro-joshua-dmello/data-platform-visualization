@@ -1,14 +1,11 @@
+// correct order
 import React, { useMemo, useState } from "react";
-import {
-  inspectDataset,
-  uploadDatasetWithProgress,
-  type ApiError,
-  type UploadResponse,
-} from "../api";
+import { inspectDataset, uploadDataset, type ApiError, type UploadResponse } from "../api";
 import { useAppStore } from "../store";
 import type { Dataset, LayerConfig, RenderType, LayerType } from "../types";
 
-const MAX_MB = 50;
+const MAX_MB = 2048;
+// remove CHUNKED_THRESHOLD from here entirely — it lives in api.ts
 
 function prettyError(err: unknown): string {
   const e = err as ApiError | undefined;
@@ -83,7 +80,9 @@ export function UploadPanel() {
         setRenderType(nextRenderType);
 
         setInfo(
-          `GeoJSON detected with ${result.featureCount} feature(s). Render as ${nextLayerType}.`
+          result.featureCount === -1
+            ? `Large GeoJSON detected. Render as ${nextLayerType}.`
+            : `GeoJSON detected with ${result.featureCount} feature(s). Render as ${nextLayerType}.`
         );
       }
     } catch (err) {
@@ -146,12 +145,13 @@ export function UploadPanel() {
     setProgress(0);
 
     try {
-      const result = await uploadDatasetWithProgress({
+      const result = await uploadDataset({
         file,
         latColumn: fileType === "csv" ? selectedLat : undefined,
         lngColumn: fileType === "csv" ? selectedLng : undefined,
         onProgress: (pct) => setProgress(pct),
       });
+
 
       console.log("Upload result:", result);
 

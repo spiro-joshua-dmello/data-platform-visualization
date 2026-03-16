@@ -16,7 +16,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
- 
+
   martin:
     image: ghcr.io/maplibre/martin:v0.13.0
     container_name: kepler-martin
@@ -29,6 +29,6 @@ services:
     ports:
       - "3000:3000"
     command: ["postgres://postgres:postgres@db:5432/kepler"]
- 
+
 volumes:
   pg_data:

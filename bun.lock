@@ -1,0 +1,14 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "dependencies": {
+        "stream-chain": "^3.4.1",
+      },
+    },
+  },
+  "packages": {
+    "stream-chain": ["stream-chain@3.4.1", "", {}, "sha512-v6WzCSUAIUMEaR/iuNZzhxeS0god/gL9qPUvgwPtBdIr7+vQHNgitM8lq9Nfqxnb09EjpT4aWQlGnkEDEdYSdg=="],
+  }
+}

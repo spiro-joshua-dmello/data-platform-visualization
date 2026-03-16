@@ -12,8 +12,11 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.9",
+    "@types/stream-json": "^1.7.8",
     "hono": "^4.11.10",
     "papaparse": "^5.5.3",
-    "postgres": "^3.4.8"
+    "postgres": "^3.4.8",
+    "stream-chain": "^3.4.1",
+    "stream-json": "^1.9.1"
   }
 }
