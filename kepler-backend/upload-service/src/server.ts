@@ -3,12 +3,10 @@ import { serve } from "@hono/node-server";
 import postgres from "postgres";
 import Papa from "papaparse";
 import { cors } from "hono/cors";
-import { createWriteStream, createReadStream, existsSync } from "fs";
-import { mkdir, readFile } from "fs/promises";
+import { createReadStream, existsSync } from "fs";
+import { mkdir, readFile, open } from "fs/promises";
 import { join } from "path";
-import { pipeline } from "stream/promises";
 
-// Replace with:
 const { chain } = require("stream-chain");
 const { parser } = require("stream-json");
 const { pick } = require("stream-json/filters/Pick");
@@ -33,7 +31,6 @@ const sql = postgres(DATABASE_URL, {
   onnotice: () => {},
 });
 
-// Ensure temp dir exists
 await mkdir(TEMP_DIR, { recursive: true });
 
 const app = new Hono();
@@ -257,12 +254,9 @@ async function streamGeoJSONIntoDB(
   filePath: string,
   datasetId: string
 ): Promise<{ inserted: number; geomTypes: Set<string> }> {
-  const { chain } = require("stream-chain");
-  const { parser } = require("stream-json");
-  const { pick } = require("stream-json/filters/Pick");
-  const { streamArray } = require("stream-json/streamers/StreamArray");
   const geomTypes = new Set<string>();
   let inserted = 0;
+  let totalFlushed = 0;
   const BATCH_SIZE = 500;
   let batch: { table: string; geom: any; props: any }[] = [];
 
@@ -285,20 +279,25 @@ async function streamGeoJSONIntoDB(
       );
       inserted++;
     }
+    totalFlushed += batch.length;
+    if (totalFlushed % 5000 === 0) {
+      console.log(`[chunked] inserted ${totalFlushed} features so far...`);
+    }
+    
     batch = [];
   };
 
   // Peek at first 300 bytes to detect FeatureCollection vs bare array
   const headBuf = Buffer.alloc(300);
-  const fd = await import("fs/promises").then(m => m.open(filePath, "r"));
-  await fd.read(headBuf, 0, 300, 0);
-  await fd.close();
+  const peekFd = await open(filePath, "r");
+  await peekFd.read(headBuf, 0, 300, 0);
+  await peekFd.close();
   const head = headBuf.toString("utf8");
   const isFeatureCollection = /"type"\s*:\s*"FeatureCollection"/.test(head);
 
   await sql.begin(async (tx) => {
     await new Promise<void>((resolve, reject) => {
-      const pipeline = isFeatureCollection
+      const streamPipeline = isFeatureCollection
         ? chain([
             createReadStream(filePath, { encoding: "utf8" }),
             parser(),
@@ -311,17 +310,17 @@ async function streamGeoJSONIntoDB(
             streamArray(),
           ]);
 
-      pipeline.on("data", async ({ value: feature }: any) => {
-        pipeline.pause();
+      streamPipeline.on("data", async ({ value: feature }: any) => {
+        streamPipeline.pause();
         try {
           const geom =
             feature?.geometry ??
             (feature?.type && feature?.coordinates ? feature : null);
 
-          if (!geom?.type) { pipeline.resume(); return; }
+          if (!geom?.type) { streamPipeline.resume(); return; }
 
           const table = getTargetTable(geom.type);
-          if (!table) { pipeline.resume(); return; }
+          if (!table) { streamPipeline.resume(); return; }
 
           geomTypes.add(geom.type);
           const props = { ...(feature.properties ?? {}), dataset_id: datasetId };
@@ -332,10 +331,10 @@ async function streamGeoJSONIntoDB(
           reject(err);
           return;
         }
-        pipeline.resume();
+        streamPipeline.resume();
       });
 
-      pipeline.on("end", async () => {
+      streamPipeline.on("end", async () => {
         try {
           if (batch.length > 0) await flushBatch(tx);
           resolve();
@@ -344,7 +343,7 @@ async function streamGeoJSONIntoDB(
         }
       });
 
-      pipeline.on("error", reject);
+      streamPipeline.on("error", reject);
     });
   });
 
@@ -410,7 +409,6 @@ app.post("/datasets/inspect", async (c) => {
     return c.json(badRequest("FILE_REQUIRED", "file required"), 400);
   }
 
-  // Only read first 2MB for inspection — enough to detect type/columns
   const INSPECT_SAMPLE_BYTES = 2 * 1024 * 1024;
   const sample = file.size > INSPECT_SAMPLE_BYTES
     ? file.slice(0, INSPECT_SAMPLE_BYTES)
@@ -458,7 +456,6 @@ app.post("/datasets/inspect", async (c) => {
       const geomTypes = new Set<string>();
 
       if (file.size <= INSPECT_SAMPLE_BYTES) {
-        // Small file — parse normally
         json = JSON.parse(text);
         const normalized = normalizeGeoJSONTopLevel(json);
         noteType = normalized.noteType;
@@ -468,16 +465,12 @@ app.post("/datasets/inspect", async (c) => {
           if (g?.type) geomTypes.add(g.type);
         }
       } else {
-        // Large file — regex scan the sample for geometry types
         const geomTypePattern = /"type"\s*:\s*"(Point|MultiPoint|LineString|MultiLineString|Polygon|MultiPolygon)"/g;
         let match;
         while ((match = geomTypePattern.exec(text)) !== null) {
           geomTypes.add(match[1]);
         }
-
-        // Estimate feature count by counting "type":"Feature" occurrences in full filename hint
-        // We can't know exactly without parsing, so we mark it as unknown
-        featureCount = -1; // signals "large file, count unknown"
+        featureCount = -1;
         noteType = "FeatureCollection";
       }
 
@@ -520,7 +513,7 @@ app.post("/datasets/inspect", async (c) => {
   );
 });
 
-// ── Upload route (small files ≤50MB, existing behaviour) ─────────────────────
+// ── Upload route (small files ≤50MB) ─────────────────────────────────────────
 
 app.post("/datasets/upload", async (c) => {
   const startedAt = Date.now();
@@ -529,10 +522,7 @@ app.post("/datasets/upload", async (c) => {
 
   if (!(file instanceof File)) {
     return c.json(
-      badRequest(
-        "FILE_REQUIRED",
-        "file required (multipart field name must be 'file')"
-      ),
+      badRequest("FILE_REQUIRED", "file required (multipart field name must be 'file')"),
       400
     );
   }
@@ -667,10 +657,7 @@ app.post("/datasets/upload", async (c) => {
 
     if (!latColumn || !lngColumn) {
       return c.json(
-        badRequest(
-          "CSV_COLUMNS_REQUIRED",
-          "Latitude/Longitude columns not found"
-        ),
+        badRequest("CSV_COLUMNS_REQUIRED", "Latitude/Longitude columns not found"),
         400
       );
     }
@@ -755,9 +742,7 @@ app.post("/datasets/upload/init", async (c) => {
     JSON.stringify({ fileName, fileSize, totalChunks, latColumn, lngColumn })
   );
 
-  console.log(
-    `[chunked] init uploadId=${uploadId} file=${fileName} chunks=${totalChunks}`
-  );
+  console.log(`[chunked] init uploadId=${uploadId} file=${fileName} chunks=${totalChunks}`);
 
   return c.json({ ok: true, uploadId });
 });
@@ -779,16 +764,10 @@ app.post("/datasets/upload/chunk", async (c) => {
 
   const uploadDir = join(TEMP_DIR, uploadId);
   if (!existsSync(uploadDir)) {
-    return c.json(
-      badRequest("UNKNOWN_UPLOAD", "Upload session not found"),
-      404
-    );
+    return c.json(badRequest("UNKNOWN_UPLOAD", "Upload session not found"), 404);
   }
 
-  const chunkPath = join(
-    uploadDir,
-    `chunk_${String(chunkIndex).padStart(6, "0")}`
-  );
+  const chunkPath = join(uploadDir, `chunk_${String(chunkIndex).padStart(6, "0")}`);
   await Bun.write(chunkPath, await chunk.arrayBuffer());
 
   console.log(`[chunked] received chunk ${chunkIndex} for uploadId=${uploadId}`);
@@ -808,36 +787,27 @@ app.post("/datasets/upload/finalize", async (c) => {
 
   const uploadDir = join(TEMP_DIR, uploadId);
   if (!existsSync(uploadDir)) {
-    return c.json(
-      badRequest("UNKNOWN_UPLOAD", "Upload session not found"),
-      404
-    );
+    return c.json(badRequest("UNKNOWN_UPLOAD", "Upload session not found"), 404);
   }
 
-  const meta = JSON.parse(
-    await Bun.file(join(uploadDir, "meta.json")).text()
-  );
+  const meta = JSON.parse(await Bun.file(join(uploadDir, "meta.json")).text());
   const { fileName, totalChunks, latColumn, lngColumn } = meta;
 
-  console.log(
-    `[chunked] finalizing uploadId=${uploadId} file=${fileName} chunks=${totalChunks}`
-  );
+  console.log(`[chunked] finalizing uploadId=${uploadId} file=${fileName} chunks=${totalChunks}`);
 
-  // Assemble chunks into one file
+  // Assemble chunks using fd.write — no streams, no listener leaks
   const assembledPath = join(uploadDir, "assembled");
-  const writeStream = createWriteStream(assembledPath);
+  const outFd = await open(assembledPath, "w");
 
-  for (let i = 0; i < totalChunks; i++) {
-    const chunkPath = join(
-      uploadDir,
-      `chunk_${String(i).padStart(6, "0")}`
-    );
-    const readStream = createReadStream(chunkPath);
-    await pipeline(readStream, writeStream, { end: false });
+  try {
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkPath = join(uploadDir, `chunk_${String(i).padStart(6, "0")}`);
+      const chunkData = await Bun.file(chunkPath).arrayBuffer();
+      await outFd.write(new Uint8Array(chunkData));
+    }
+  } finally {
+    await outFd.close();
   }
-
-  writeStream.end();
-  await new Promise<void>((r) => writeStream.on("finish", r));
 
   console.log(`[chunked] assembled ${fileName} at ${assembledPath}`);
 
@@ -850,17 +820,13 @@ app.post("/datasets/upload/finalize", async (c) => {
 
       if (result.inserted === 0) {
         return c.json(
-          badRequest(
-            "NO_VALID_FEATURES",
-            "No valid features could be inserted."
-          ),
+          badRequest("NO_VALID_FEATURES", "No valid features could be inserted."),
           400
         );
       }
 
       const geometryTypes = [...result.geomTypes];
-      const suggestedLayerType =
-        inferSuggestedLayerTypeFromGeomTypes(geometryTypes);
+      const suggestedLayerType = inferSuggestedLayerTypeFromGeomTypes(geometryTypes);
       const renderType = inferDatasetRenderType(geometryTypes);
       const bounds = await getDatasetBounds(datasetId);
 
@@ -884,27 +850,16 @@ app.post("/datasets/upload/finalize", async (c) => {
     if (lower.endsWith(".csv")) {
       if (!latColumn || !lngColumn) {
         return c.json(
-          badRequest(
-            "CSV_COLUMNS_REQUIRED",
-            "latColumn and lngColumn are required for CSV uploads"
-          ),
+          badRequest("CSV_COLUMNS_REQUIRED", "latColumn and lngColumn are required for CSV uploads"),
           400
         );
       }
 
-      const result = await streamCSVIntoDB(
-        assembledPath,
-        datasetId,
-        latColumn,
-        lngColumn
-      );
+      const result = await streamCSVIntoDB(assembledPath, datasetId, latColumn, lngColumn);
 
       if (result.inserted === 0) {
         return c.json(
-          badRequest(
-            "NO_VALID_COORDINATES",
-            "No valid coordinate rows found."
-          ),
+          badRequest("NO_VALID_COORDINATES", "No valid coordinate rows found."),
           400
         );
       }
@@ -927,12 +882,8 @@ app.post("/datasets/upload/finalize", async (c) => {
       });
     }
 
-    return c.json(
-      badRequest("UNSUPPORTED_FILE", "Unsupported file type"),
-      400
-    );
+    return c.json(badRequest("UNSUPPORTED_FILE", "Unsupported file type"), 400);
   } finally {
-    // Cleanup temp dir regardless of success/failure
     Bun.spawn(["rm", "-rf", uploadDir]);
   }
 });

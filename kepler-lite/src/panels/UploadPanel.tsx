@@ -268,23 +268,22 @@ export function UploadPanel() {
         </div>
       )}
 
+      
       {uploading && (
         <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 13 }}>Uploading… {progress}%</div>
-          <div
-            style={{
-              width: "100%",
-              height: 10,
-              background: "#eee",
-              borderRadius: 999,
-              overflow: "hidden",
-            }}
-          >
+          <div style={{ fontSize: 13 }}>
+            {progress < 80
+              ? `Uploading… ${progress}%`
+              : progress < 100
+              ? `Processing on server… this may take several minutes for large files`
+              : `Finalizing…`}
+          </div>
+          <div style={{ width: "100%", height: 10, background: "#eee", borderRadius: 999, overflow: "hidden" }}>
             <div
               style={{
                 width: `${Math.max(progress, 2)}%`,
                 height: "100%",
-                background: "#2f80ed",
+                background: progress >= 80 ? "#f59e0b" : "#2f80ed",
                 transition: "width 120ms ease",
               }}
             />
