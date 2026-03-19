@@ -289,3 +289,47 @@ export async function uploadDataset(opts: {
   }
   return uploadDatasetWithProgress(opts);
 }
+
+const BASE = "http://localhost:8787";
+
+// ── Dataset catalog ──────────────────────────────────────────────────────────
+
+export async function fetchCatalog() {
+  const r = await fetch(`${BASE}/datasets`);
+  return r.json() as Promise<{ ok: boolean; datasets: CatalogDataset[] }>;
+}
+
+export async function deleteDatasetFromDB(datasetId: string) {
+  const r = await fetch(`${BASE}/datasets/${datasetId}`, { method: "DELETE" });
+  return r.json();
+}
+
+// ── Feature CRUD ─────────────────────────────────────────────────────────────
+
+export async function fetchFeatures(datasetId: string, table: string) {
+  const r = await fetch(`${BASE}/datasets/${datasetId}/features?table=${table}`);
+  return r.json(); // GeoJSON FeatureCollection
+}
+
+export async function addFeature(datasetId: string, geometry: any, properties: any, table: string) {
+  const r = await fetch(`${BASE}/datasets/${datasetId}/features`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ geometry, properties, table }),
+  });
+  return r.json();
+}
+
+export async function updateFeature(table: string, featureId: string, patch: { geometry?: any; properties?: any }) {
+  const r = await fetch(`${BASE}/features/${table}/${featureId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return r.json();
+}
+
+export async function deleteFeature(table: string, featureId: string) {
+  const r = await fetch(`${BASE}/features/${table}/${featureId}`, { method: "DELETE" });
+  return r.json();
+}

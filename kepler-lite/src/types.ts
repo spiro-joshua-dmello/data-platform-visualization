@@ -1,5 +1,4 @@
 export type Bounds = [number, number, number, number];
-
 export type DatasetType = "vector-tile";
 export type LayerType = "circle" | "line" | "fill";
 export type RenderType = "point" | "line" | "polygon" | "mixed";
@@ -29,4 +28,29 @@ export type ViewState = {
   zoom: number;
   pitch: number;
   bearing: number;
+};
+
+// ── Editing ──────────────────────────────────────────────────────────────────
+
+export type EditMode =
+  | { type: "none" }
+  | { type: "select"; datasetId: string; table: string }
+  | { type: "draw"; datasetId: string; table: string; geomKind: "point" | "line" | "polygon" }
+  | { type: "editGeom"; datasetId: string; table: string; featureId: string };
+
+export type GeoFeature = {
+  id: string;
+  type: "Feature";
+  geometry: any;
+  properties: Record<string, any>;
+};
+
+// Dataset catalog entry (from DB)
+export type CatalogDataset = {
+  id: string;
+  name: string;
+  kind: string;
+  table_name: string;
+  created_at: string;
+  feature_count: number;
 };

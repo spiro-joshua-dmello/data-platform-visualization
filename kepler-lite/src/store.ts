@@ -10,6 +10,10 @@ type AppState = {
   uploadOpen: boolean;
   setUploadOpen: (open: boolean) => void;
 
+  // ── Edit mode — shared between EditPanel (sidebar) and MapView ─────────────
+  activeDatasetId: string | null;
+  setActiveDatasetId: (id: string | null) => void;
+
   addDataset: (d: Dataset) => void;
   removeDataset: (id: string) => void;
 
@@ -37,6 +41,10 @@ export const useAppStore = create<AppState>((set) => ({
   uploadOpen: true,
   setUploadOpen: (open) => set({ uploadOpen: open }),
 
+  // Edit
+  activeDatasetId: null,
+  setActiveDatasetId: (id) => set({ activeDatasetId: id }),
+
   addDataset: (d) =>
     set((s) => ({
       datasets: [d, ...s.datasets.filter((existing) => existing.id !== d.id)],
@@ -46,6 +54,8 @@ export const useAppStore = create<AppState>((set) => ({
     set((s) => ({
       datasets: s.datasets.filter((d) => d.id !== id),
       layers: s.layers.filter((l) => l.datasetId !== id),
+      // Clear active edit if this dataset was being edited
+      activeDatasetId: s.activeDatasetId === id ? null : s.activeDatasetId,
     })),
 
   addLayer: (l) =>
