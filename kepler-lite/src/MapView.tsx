@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import DeckGL from "@deck.gl/react";
 import Map, { Source, Layer, Marker } from "react-map-gl/maplibre";
 import { useAppStore } from "./store";
@@ -82,18 +82,14 @@ function AttributeModal({
   title: string;
   feature: GeoFeature;
   table: string;
-  /** true when this is a brand-new feature being created */
   isNew?: boolean;
-  /** column names inferred from existing features in the dataset */
   schemaKeys?: string[];
   onClose: () => void;
   onSaved: (updated: GeoFeature) => void;
 }) {
-  // For new features: start with schema keys as empty strings.
-  // For existing features: start with their current sanitized props.
   const buildInitial = (): Record<string, string> => {
+    // For new features: pre-populate with schema keys as empty strings
     if (isNew && schemaKeys && schemaKeys.length > 0) {
-      // Pre-populate all schema columns with empty strings
       return Object.fromEntries(schemaKeys.map((k) => [k, ""]));
     }
     if (feature.properties._sanitized && typeof feature.properties._sanitized === "object") {
@@ -108,18 +104,12 @@ function AttributeModal({
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState("");
 
-  // Whether to show the freeform "add new key" section:
-  // only show it when creating a new feature AND the dataset has no schema yet
-  const hasSchema = schemaKeys && schemaKeys.length > 0;
-  const showAddKey = isNew;   // always allow adding extra keys on new features
-
   async function handleSave() {
     setSaving(true);
     setError("");
     try {
       const isPending = feature.id.startsWith("pending-");
       if (!isPending) {
-        // Existing feature — PATCH immediately
         const res = await fetch(`${API}/features/${table}/${feature.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -127,7 +117,6 @@ function AttributeModal({
         });
         if (!res.ok) throw new Error(await res.text());
       }
-      // Always pass updated props back to parent (which stages the change)
       onSaved({ ...feature, properties: { ...feature.properties, ...props, _sanitized: props } });
       onClose();
     } catch (e: any) {
@@ -144,6 +133,7 @@ function AttributeModal({
   }
 
   const keys = Object.keys(props);
+  const hasSchemaKeys = (schemaKeys?.length ?? 0) > 0;
 
   return (
     <div
@@ -158,7 +148,6 @@ function AttributeModal({
         padding: 24, width: 460, maxHeight: "85vh", overflow: "auto",
         display: "grid", gap: 14, boxShadow: "0 24px 60px rgba(0,0,0,0.7)",
       }}>
-        {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{title}</div>
@@ -174,82 +163,82 @@ function AttributeModal({
           }}>✕</button>
         </div>
 
-        {/* Schema-based fields (new feature with known columns) */}
-        {isNew && hasSchema && (
+        {isNew && hasSchemaKeys && (
           <div style={{
             background: "#0a1628", border: "1px solid #1e3a5f",
-            borderRadius: 8, padding: "8px 12px",
-            fontSize: 12, color: "#60a5fa",
+            borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#60a5fa",
           }}>
-            Fill in the values for this new feature. Fields match existing dataset columns.
+            Fill in values for this new feature. Columns match the existing dataset schema.
           </div>
         )}
 
-        {/* No schema and no keys yet */}
-        {keys.length === 0 && !showAddKey && (
+        {isNew && !hasSchemaKeys && (
+          <div style={{
+            background: "#1a1206", border: "1px solid #4a3500",
+            borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#c0a030",
+          }}>
+            No existing columns found. Use the fields below to add attributes.
+          </div>
+        )}
+
+        {/* Attribute fields — either from schema or from existing props */}
+        {keys.length > 0 && (
+          <div style={{ display: "grid", gap: 10 }}>
+            {keys.map((k) => (
+              <label key={k} style={{ display: "grid", gap: 5, fontSize: 13 }}>
+                <span style={{ color: "#a5adbb", fontWeight: 600, fontSize: 12 }}>{k}</span>
+                <input
+                  value={props[k]}
+                  placeholder={isNew ? `Enter ${k}…` : ""}
+                  onChange={(e) => setProps({ ...props, [k]: e.target.value })}
+                  style={{
+                    padding: "8px 10px", background: "#15181d",
+                    border: "1px solid #232832",
+                    borderRadius: 7, color: "#e7eaf0", fontSize: 13, outline: "none",
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+        )}
+
+        {keys.length === 0 && !isNew && (
           <div style={{ fontSize: 13, color: "#a5adbb" }}>No editable attributes.</div>
         )}
 
-        {/* Attribute fields */}
-        {keys.map((k) => (
-          <label key={k} style={{ display: "grid", gap: 5, fontSize: 13 }}>
-            <span style={{ color: "#a5adbb", fontWeight: 600, fontSize: 12 }}>{k}</span>
-            <input
-              autoFocus={keys.indexOf(k) === 0}
-              value={props[k]}
-              placeholder={isNew ? `Enter ${k}…` : ""}
-              onChange={(e) => setProps({ ...props, [k]: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  // Move to next field or save if last
-                  const idx = keys.indexOf(k);
-                  if (idx === keys.length - 1 && !showAddKey) handleSave();
-                }
-              }}
+        {/* Add new attribute column — always available */}
+        <div style={{
+          border: "1px dashed #3a4255", borderRadius: 8, padding: 12, display: "grid", gap: 8,
+        }}>
+          <div style={{ fontSize: 12, color: "#5a6275", fontWeight: 600 }}>
+            {isNew ? "Add extra attribute column" : "Add new attribute"}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input placeholder="Field name" value={newKey}
+              onChange={(e) => setNewKey(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addNewKey()}
               style={{
-                padding: "8px 10px", background: "#15181d",
-                border: `1px solid ${isNew && props[k] === "" ? "#3a4255" : "#232832"}`,
-                borderRadius: 7, color: "#e7eaf0", fontSize: 13, outline: "none",
+                flex: 1, padding: "6px 10px", background: "#15181d",
+                border: "1px solid #232832", borderRadius: 7,
+                color: "#e7eaf0", fontSize: 12, outline: "none",
               }}
             />
-          </label>
-        ))}
-
-        {/* Freeform add-key section for new features (or when schema is empty) */}
-        {showAddKey && (
-          <div style={{
-            border: "1px dashed #3a4255", borderRadius: 8, padding: 12, display: "grid", gap: 8,
-          }}>
-            <div style={{ fontSize: 12, color: "#5a6275", fontWeight: 600 }}>
-              {hasSchema ? "Add extra attribute" : "Add attribute"}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input placeholder="Field name" value={newKey}
-                onChange={(e) => setNewKey(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addNewKey()}
-                style={{
-                  flex: 1, padding: "6px 10px", background: "#15181d",
-                  border: "1px solid #232832", borderRadius: 7,
-                  color: "#e7eaf0", fontSize: 12, outline: "none",
-                }}
-              />
-              <input placeholder="Value" value={newVal}
-                onChange={(e) => setNewVal(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addNewKey()}
-                style={{
-                  flex: 2, padding: "6px 10px", background: "#15181d",
-                  border: "1px solid #232832", borderRadius: 7,
-                  color: "#e7eaf0", fontSize: 12, outline: "none",
-                }}
-              />
-              <button onClick={addNewKey} style={{
-                padding: "6px 12px", background: "#1e3a5f",
-                border: "1px solid #2a5298", borderRadius: 7,
-                color: "#60a5fa", fontSize: 12, cursor: "pointer",
-              }}>Add</button>
-            </div>
+            <input placeholder="Value" value={newVal}
+              onChange={(e) => setNewVal(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addNewKey()}
+              style={{
+                flex: 2, padding: "6px 10px", background: "#15181d",
+                border: "1px solid #232832", borderRadius: 7,
+                color: "#e7eaf0", fontSize: 12, outline: "none",
+              }}
+            />
+            <button onClick={addNewKey} style={{
+              padding: "6px 12px", background: "#1e3a5f",
+              border: "1px solid #2a5298", borderRadius: 7,
+              color: "#60a5fa", fontSize: 12, cursor: "pointer",
+            }}>Add</button>
           </div>
-        )}
+        </div>
 
         {error && (
           <div style={{ color: "#f87171", fontSize: 12, padding: "6px 10px", background: "#1f1315", borderRadius: 6 }}>
@@ -384,37 +373,23 @@ function EditToolbar({
         ✏️ <strong style={{ color: "#e7eaf0" }}>{activeDataset.name}</strong>
         {loadedCount > 0 && <span style={{ marginLeft: 6 }}>({loadedCount})</span>}
       </div>
-
-      <button onClick={onLoadFeatures} style={btn(false)} title="Load features for vertex/drag editing">
-        ⟳ Load
-      </button>
-      <button onClick={() => setEditMode("select")} style={btn(editMode === "select")}>
-        ↖ Select
-      </button>
-
+      <button onClick={onLoadFeatures} style={btn(false)}>⟳ Load</button>
+      <button onClick={() => setEditMode("select")} style={btn(editMode === "select")}>↖ Select</button>
       {activeDataset.renderType === "point" && (
-        <button onClick={() => setEditMode("add-point")} style={btn(editMode === "add-point")}>
-          + Point
-        </button>
+        <button onClick={() => setEditMode("add-point")} style={btn(editMode === "add-point")}>+ Point</button>
       )}
       {activeDataset.renderType === "line" && (
-        <button onClick={() => setEditMode("draw-line")} style={btn(editMode === "draw-line")}>
-          ✏ Line
-        </button>
+        <button onClick={() => setEditMode("draw-line")} style={btn(editMode === "draw-line")}>✏ Line</button>
       )}
       {(activeDataset.renderType === "polygon" || activeDataset.renderType === "mixed") && (
-        <button onClick={() => setEditMode("draw-polygon")} style={btn(editMode === "draw-polygon")}>
-          ⬡ Polygon
-        </button>
+        <button onClick={() => setEditMode("draw-polygon")} style={btn(editMode === "draw-polygon")}>⬡ Polygon</button>
       )}
-
       <button onClick={onExitEdit} style={btn(false, true)}>⏹ Exit</button>
     </div>
   );
 }
 
 // ── FeaturePopup ──────────────────────────────────────────────────────────────
-// Used in both inspect mode (read-only) and edit mode
 
 function FeaturePopup({
   feature, isEditMode, selectionCount,
@@ -429,7 +404,7 @@ function FeaturePopup({
 }) {
   const sanitized = (feature.properties._sanitized as Record<string, string> | undefined)
     ?? sanitizeProps(feature.properties);
-  const attrKeys = Object.keys(sanitized).slice(0, 8); // show up to 8 in popup
+  const attrKeys = Object.keys(sanitized).slice(0, 8);
 
   return (
     <div style={{
@@ -439,7 +414,6 @@ function FeaturePopup({
       width: 280, maxHeight: "50vh", overflow: "auto",
       boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
     }}>
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#e7eaf0" }}>
           {feature.id.startsWith("pending-") ? "New feature" : "Feature info"}
@@ -458,13 +432,11 @@ function FeaturePopup({
         }}>✕</button>
       </div>
 
-      {/* ID */}
       <div style={{ fontSize: 10, color: "#3a4255", fontFamily: "monospace", wordBreak: "break-all" }}>
         {feature.id.startsWith("pending-") ? "Unsaved — staged for commit" : feature.id}
       </div>
 
-      {/* Attribute preview */}
-      {attrKeys.length > 0 && (
+      {attrKeys.length > 0 ? (
         <div style={{ display: "grid", gap: 4 }}>
           {attrKeys.map((k) => (
             <div key={k} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8, alignItems: "baseline" }}>
@@ -483,12 +455,10 @@ function FeaturePopup({
             </div>
           )}
         </div>
-      )}
-      {attrKeys.length === 0 && (
+      ) : (
         <div style={{ fontSize: 12, color: "#3a4255" }}>No attributes</div>
       )}
 
-      {/* Actions */}
       <div style={{ display: "flex", gap: 8, marginTop: 4, borderTop: "1px solid #1a1f2a", paddingTop: 8 }}>
         <button onClick={onEditAttrs} style={{
           flex: 1, padding: "6px 0",
@@ -517,7 +487,33 @@ export function MapView() {
   const {
     datasets, layers, viewState, setViewState,
     activeDatasetId, setActiveDatasetId,
+    zoomTarget,
   } = useAppStore();
+
+  // DeckGL owns its view state. Seeded from store once, then driven by user interaction.
+  const [deckViewState, setDeckViewState] = useState<any>({
+    longitude: viewState.longitude,
+    latitude:  viewState.latitude,
+    zoom:      viewState.zoom,
+    pitch:     viewState.pitch ?? 0,
+    bearing:   viewState.bearing ?? 0,
+  });
+
+  // React to zoomTarget changes (set by LayerPanel "Zoom" button via store.zoomToLayer)
+  const lastZoomTargetId = useRef<number>(-1);
+  useEffect(() => {
+    if (!zoomTarget) return;
+    if (zoomTarget.id === lastZoomTargetId.current) return;
+    lastZoomTargetId.current = zoomTarget.id;
+    setDeckViewState({
+      longitude:          zoomTarget.longitude,
+      latitude:           zoomTarget.latitude,
+      zoom:               zoomTarget.zoom,
+      pitch:              0,
+      bearing:            0,
+      transitionDuration: 900,
+    });
+  }, [zoomTarget]);
 
   const [editFeatures, setEditFeatures]       = useState<GeoFeature[]>([]);
   const [localEditMode, setLocalEditMode]     = useState<EditMode>("none");
@@ -529,127 +525,12 @@ export function MapView() {
   const [pendingChanges, setPendingChanges]   = useState<PendingChange[]>([]);
   const [savingAll, setSavingAll]             = useState(false);
   const [tileKey, setTileKey]                 = useState(0);
-  const mapRef  = useRef<any>(null);
-  const deckRef = useRef<any>(null);
+  // Schema fetched from server for the active dataset (used in add-point modal)
+  const [serverSchema, setServerSchema]       = useState<string[]>([]);
 
-  // ── Attach native click listener to DeckGL's canvas ───────────────────────
-  // DeckGL swallows pointer events — its canvas never lets Map.onClick fire.
-  // Attaching a native listener directly to the canvas is the only reliable
-  // way to intercept clicks while still letting DeckGL handle pan/zoom.
-  useEffect(() => {
-    // DeckGL renders into a canvas; find it in the deckRef container
-    const container = deckRef.current;
-    if (!container) return;
+  const mapRef = useRef<any>(null);
 
-    const canvas = container.querySelector?.("canvas") as HTMLCanvasElement | null;
-    if (!canvas) return;
-
-    const onClick = (e: MouseEvent) => {
-      if (showAttrModal) return;
-      const map = mapRef.current?.getMap?.();
-      if (!map) return;
-
-      // Get pixel coords relative to the canvas
-      const rect = canvas.getBoundingClientRect();
-      const x    = e.clientX - rect.left;
-      const y    = e.clientY - rect.top;
-
-      // add-point mode
-      if (localEditMode === "add-point" && activeDatasetId) {
-        const lngLat = map.unproject([x, y]);
-        const tmpId  = "pending-" + Date.now();
-        const tmpFeat: GeoFeature = {
-          id: tmpId, type: "Feature",
-          geometry:   { type: "Point", coordinates: [lngLat.lng, lngLat.lat] },
-          properties: { _pending: true, _sanitized: {} },
-        };
-        setEditFeatures((fs) => [...fs, tmpFeat]);
-        setSelectedFeature(tmpFeat);
-        setAttrModalIsNew(true);
-        setShowAttrModal(true);
-        return;
-      }
-
-      // draw-line / draw-polygon
-      if ((localEditMode === "draw-line" || localEditMode === "draw-polygon") && activeDatasetId) {
-        const lngLat = map.unproject([x, y]);
-        setDrawVertices((v) => [...v, [lngLat.lng, lngLat.lat]]);
-        return;
-      }
-
-      // inspect / select — query rendered features at click point
-      const bbox: any = [[x - 12, y - 12], [x + 12, y + 12]];
-      const allLayerIds = layers.flatMap((l) =>
-        l.type === "fill" ? [`${l.id}-fill`, `${l.id}-outline`] : [l.id]
-      );
-
-      let hits: any[] = [];
-      try {
-        hits = map.queryRenderedFeatures(bbox,
-          allLayerIds.length > 0 ? { layers: allLayerIds } : {}
-        ) ?? [];
-      } catch (_) { /* map not ready */ }
-
-      if (hits.length === 0) {
-        setSelectedFeature(null);
-        setSelectionCount(0);
-        return;
-      }
-
-      setSelectionCount(hits.length);
-      const hit = hits[0];
-      const fid = String(hit.id ?? hit.properties?.id ?? hit.properties?._fid ?? "");
-
-      // Prefer a loaded editFeature (has sanitized props + full geometry)
-      const inEdits = editFeatures.find((f) => f.id === fid);
-      if (inEdits) {
-        setSelectedFeature(inEdits);
-        setAttrModalIsNew(false);
-        return;
-      }
-
-      // Synthetic feature from tile properties
-      const tileProps = { ...(hit.properties ?? {}) };
-      setSelectedFeature({
-        id:         fid || `hit-${Date.now()}`,
-        type:       "Feature",
-        geometry:   null,
-        properties: { ...tileProps, _sanitized: sanitizeProps(tileProps) },
-      });
-      setAttrModalIsNew(false);
-    };
-
-    // Use capture:false so DeckGL's own handlers still fire first
-    canvas.addEventListener("click", onClick);
-    return () => canvas.removeEventListener("click", onClick);
-  }, [
-    // Re-attach when anything the handler references changes
-    localEditMode, activeDatasetId, layers, editFeatures, showAttrModal,
-  ]);
-
-  const vectorDatasets = datasets.filter((d) => d.type === "vector-tile");
-  const activeDataset  = datasets.find((d) => d.id === activeDatasetId) ?? null;
-  const activeTable    =
-    activeDataset?.renderType === "point"  ? "points" :
-    activeDataset?.renderType === "line"   ? "lines"  : "polygons";
-
-  // Infer dataset schema from loaded features — collect all unique attribute keys
-  // across all non-pending features, in order of first appearance
-  const datasetSchema: string[] = React.useMemo(() => {
-    const seen = new Set<string>();
-    const keys: string[] = [];
-    for (const f of editFeatures) {
-      if (f.id.startsWith("pending-")) continue;
-      const sanitized = (f.properties._sanitized as Record<string, string> | undefined) ?? {};
-      for (const k of Object.keys(sanitized)) {
-        if (!seen.has(k)) { seen.add(k); keys.push(k); }
-      }
-      if (keys.length >= 50) break; // cap at 50 columns
-    }
-    return keys;
-  }, [editFeatures]);
-
-  // Sync: when store clears activeDatasetId, reset everything
+  // When activeDatasetId changes, reset edit state
   useEffect(() => {
     if (activeDatasetId === null) {
       setLocalEditMode("none");
@@ -657,10 +538,152 @@ export function MapView() {
       setSelectedFeature(null);
       setDrawVertices([]);
       setPendingChanges([]);
+      setServerSchema([]);
     }
   }, [activeDatasetId]);
 
-  // ── Load features from backend ─────────────────────────────────────────────
+  // Fetch schema for active dataset whenever it changes (for add-point modal)
+  useEffect(() => {
+    if (!activeDatasetId) { setServerSchema([]); return; }
+
+    const activeDataset = datasets.find((d) => d.id === activeDatasetId);
+    if (!activeDataset) return;
+
+    const table =
+      activeDataset.renderType === "point" ? "points" :
+      activeDataset.renderType === "line"  ? "lines"  : "polygons";
+
+    fetch(`${API}/datasets/${activeDatasetId}/features?table=${table}`)
+      .then((r) => r.json())
+      .then((fc) => {
+        const features = fc.features ?? [];
+        if (features.length === 0) { setServerSchema([]); return; }
+        // Collect unique keys from first feature's properties
+        const seen = new Set<string>();
+        const keys: string[] = [];
+        for (const f of features.slice(0, 5)) {
+          const s = sanitizeProps(f.properties ?? {});
+          for (const k of Object.keys(s)) {
+            if (!seen.has(k)) { seen.add(k); keys.push(k); }
+          }
+        }
+        setServerSchema(keys);
+      })
+      .catch(() => setServerSchema([]));
+  }, [activeDatasetId, datasets]);
+
+  const vectorDatasets = datasets.filter((d) => d.type === "vector-tile");
+  const activeDataset  = datasets.find((d) => d.id === activeDatasetId) ?? null;
+  const activeTable    =
+    activeDataset?.renderType === "point" ? "points" :
+    activeDataset?.renderType === "line"  ? "lines"  : "polygons";
+
+  // Schema from locally loaded features (takes precedence if available)
+  const localSchema: string[] = useMemo(() => {
+    const seen = new Set<string>();
+    const keys: string[] = [];
+    for (const f of editFeatures) {
+      if (f.id.startsWith("pending-")) continue;
+      const s = (f.properties._sanitized as Record<string, string> | undefined) ?? {};
+      for (const k of Object.keys(s)) {
+        if (!seen.has(k)) { seen.add(k); keys.push(k); }
+      }
+      if (keys.length >= 50) break;
+    }
+    return keys;
+  }, [editFeatures]);
+
+  // Use local schema if we have loaded features, otherwise server schema
+  const activeSchema = localSchema.length > 0 ? localSchema : serverSchema;
+
+  // ── DeckGL onClick ────────────────────────────────────────────────────────
+  const handleDeckClick = (info: any, _event: any) => {
+    if (showAttrModal) return;
+
+    const pixelX: number = info.x;
+    const pixelY: number = info.y;
+
+    // add-point
+    if (localEditMode === "add-point" && activeDatasetId) {
+      if (!info.coordinate) return;
+      const [lng, lat] = info.coordinate as [number, number];
+      const tmpId = "pending-" + Date.now();
+      const tmpFeat: GeoFeature = {
+        id: tmpId, type: "Feature",
+        geometry:   { type: "Point", coordinates: [lng, lat] },
+        properties: { _pending: true, _sanitized: {} },
+      };
+      setEditFeatures((fs) => [...fs, tmpFeat]);
+      setSelectedFeature(tmpFeat);
+      setAttrModalIsNew(true);
+      setShowAttrModal(true);
+      return;
+    }
+
+    // draw-line / draw-polygon
+    if ((localEditMode === "draw-line" || localEditMode === "draw-polygon") && activeDatasetId) {
+      if (!info.coordinate) return;
+      const [lng, lat] = info.coordinate as [number, number];
+      setDrawVertices((v) => [...v, [lng, lat]]);
+      return;
+    }
+
+    // inspect / select via MapLibre queryRenderedFeatures
+    const map = mapRef.current?.getMap?.();
+    if (!map) return;
+
+    const RADIUS = 14;
+    const bbox: [[number, number], [number, number]] = [
+      [pixelX - RADIUS, pixelY - RADIUS],
+      [pixelX + RADIUS, pixelY + RADIUS],
+    ];
+
+    const queryLayerIds: string[] = layers.flatMap((l) => {
+      if (!l.visible) return [];
+      if (l.type === "fill") return [`${l.id}-fill`, `${l.id}-outline`];
+      return [l.id];
+    });
+
+    let hits: any[] = [];
+    try {
+      hits = map.queryRenderedFeatures(
+        bbox,
+        queryLayerIds.length > 0 ? { layers: queryLayerIds } : {}
+      ) ?? [];
+    } catch (err) {
+      console.warn("queryRenderedFeatures error:", err);
+    }
+
+    if (hits.length === 0) {
+      setSelectedFeature(null);
+      setSelectionCount(0);
+      return;
+    }
+
+    const count = hits.length;
+    const hit   = hits[0];
+    const fid   = String(hit.id ?? hit.properties?.id ?? hit.properties?._fid ?? "");
+
+    const inEdits = editFeatures.find((f) => f.id === fid);
+    if (inEdits) {
+      setSelectedFeature(inEdits);
+      setSelectionCount(count);
+      setAttrModalIsNew(false);
+      return;
+    }
+
+    const tileProps = { ...(hit.properties ?? {}) };
+    setSelectedFeature({
+      id:         fid || `hit-${Date.now()}`,
+      type:       "Feature",
+      geometry:   null,
+      properties: { ...tileProps, _sanitized: sanitizeProps(tileProps) },
+    });
+    setSelectionCount(count);
+    setAttrModalIsNew(false);
+  };
+
+  // ── Load features ─────────────────────────────────────────────────────────
   async function loadFeatures(dsId: string, table: string) {
     try {
       const res  = await fetch(`${API}/datasets/${dsId}/features?table=${table}`);
@@ -687,7 +710,7 @@ export function MapView() {
     setTileKey((k) => k + 1);
   }
 
-  // ── Stage a change ─────────────────────────────────────────────────────────
+  // ── Stage change ─────────────────────────────────────────────────────────
   function stageChange(change: PendingChange) {
     setPendingChanges((prev) => {
       const next = [...prev];
@@ -695,7 +718,6 @@ export function MapView() {
         const idx = next.findIndex((c) => c.kind === "add" && (c as any).feature?.id === change.feature.id);
         if (idx >= 0) next[idx] = change; else next.push(change);
       } else if (change.kind === "edit") {
-        // If there's a staged add for this id, update its properties instead
         const addIdx = next.findIndex((c) => c.kind === "add" && (c as any).feature?.id === change.feature.id);
         if (addIdx >= 0) {
           (next[addIdx] as any).feature = change.feature;
@@ -704,7 +726,6 @@ export function MapView() {
           if (editIdx >= 0) next[editIdx] = change; else next.push(change);
         }
       } else {
-        // delete — remove any staged add/edit for this feature, then add delete
         const filtered = next.filter((c) =>
           !(("feature" in c) && (c as any).feature?.id === (change as any).featureId)
         );
@@ -715,12 +736,11 @@ export function MapView() {
     });
   }
 
-  // ── Save all pending ───────────────────────────────────────────────────────
+  // ── Save all ─────────────────────────────────────────────────────────────
   async function saveAllPending() {
     if (pendingChanges.length === 0) return;
     setSavingAll(true);
     let failed = 0;
-
     for (const change of pendingChanges) {
       try {
         if (change.kind === "add") {
@@ -743,30 +763,25 @@ export function MapView() {
             }),
           });
         } else if (change.kind === "delete") {
-          await fetch(`${API}/features/${change.table}/${change.featureId}`, {
-            method: "DELETE",
-          });
+          await fetch(`${API}/features/${change.table}/${change.featureId}`, { method: "DELETE" });
         }
       } catch (e) { console.error("Save failed:", change, e); failed++; }
     }
-
     setSavingAll(false);
     setPendingChanges([]);
     setTileKey((k) => k + 1);
     if (failed > 0) alert(`${failed} change(s) failed to save.`);
   }
 
-  // ── Discard pending ────────────────────────────────────────────────────────
   function discardPending() {
     if (!window.confirm("Discard all unsaved changes?")) return;
     setPendingChanges([]);
     if (activeDatasetId) loadFeatures(activeDatasetId, activeTable);
   }
 
-  // ── Confirm draw ───────────────────────────────────────────────────────────
   function confirmDrawGeometry() {
     if (!activeDatasetId || drawVertices.length < 2) return;
-    const isLine  = localEditMode === "draw-line";
+    const isLine   = localEditMode === "draw-line";
     const geometry = isLine
       ? { type: "LineString", coordinates: drawVertices }
       : { type: "Polygon",   coordinates: [[...drawVertices, drawVertices[0]]] };
@@ -780,25 +795,18 @@ export function MapView() {
     stageChange({ kind: "add", feature: newFeat, table });
     setDrawVertices([]);
     setLocalEditMode("select");
-    // Open attr modal
     setSelectedFeature(newFeat);
     setAttrModalIsNew(true);
     setShowAttrModal(true);
   }
 
-  // ── Handle attr modal save ─────────────────────────────────────────────────
   function handleAttrSaved(updated: GeoFeature) {
     setEditFeatures((fs) => fs.map((f) => f.id === updated.id ? updated : f));
-    stageChange({
-      kind:    attrModalIsNew ? "add" : "edit",
-      feature: updated,
-      table:   activeTable,
-    });
+    stageChange({ kind: attrModalIsNew ? "add" : "edit", feature: updated, table: activeTable });
     setSelectedFeature(updated);
     setShowAttrModal(false);
   }
 
-  // ── Delete feature ─────────────────────────────────────────────────────────
   function handleDelete(feature: GeoFeature) {
     if (!window.confirm("Delete this feature?")) return;
     setEditFeatures((fs) => fs.filter((f) => f.id !== feature.id));
@@ -812,34 +820,27 @@ export function MapView() {
     setSelectedFeature(null);
   }
 
-  // ── Drag handlers ──────────────────────────────────────────────────────────
   function handlePointDragEnd(feature: GeoFeature, e: { lngLat: { lng: number; lat: number } }) {
-    const newGeom = { type: "Point", coordinates: [e.lngLat.lng, e.lngLat.lat] };
-    const updated = { ...feature, geometry: newGeom };
+    const updated = { ...feature, geometry: { type: "Point", coordinates: [e.lngLat.lng, e.lngLat.lat] } };
     setEditFeatures((fs) => fs.map((f) => f.id === feature.id ? updated : f));
     stageChange({ kind: feature.id.startsWith("pending-") ? "add" : "edit", feature: updated, table: "points" });
   }
 
-  function handleVertexDragEnd(
-    feature: GeoFeature, vi: number, ri: number,
-    e: { lngLat: { lng: number; lat: number } }
-  ) {
+  function handleVertexDragEnd(feature: GeoFeature, vi: number, ri: number, e: { lngLat: { lng: number; lat: number } }) {
     const table   = feature.geometry.type === "LineString" ? "lines" : "polygons";
     const newGeom = JSON.parse(JSON.stringify(feature.geometry));
     if (newGeom.type === "LineString") {
       newGeom.coordinates[vi] = [e.lngLat.lng, e.lngLat.lat];
     } else {
       newGeom.coordinates[ri][vi] = [e.lngLat.lng, e.lngLat.lat];
-      if (vi === 0)
-        newGeom.coordinates[ri][newGeom.coordinates[ri].length - 1] = [e.lngLat.lng, e.lngLat.lat];
+      if (vi === 0) newGeom.coordinates[ri][newGeom.coordinates[ri].length - 1] = [e.lngLat.lng, e.lngLat.lat];
     }
     const updated = { ...feature, geometry: newGeom };
     setEditFeatures((fs) => fs.map((f) => f.id === feature.id ? updated : f));
     stageChange({ kind: feature.id.startsWith("pending-") ? "add" : "edit", feature: updated, table });
   }
 
-  // ── Draw preview ───────────────────────────────────────────────────────────
-  const drawPreviewGeoJSON = React.useMemo(() => {
+  const drawPreviewGeoJSON = useMemo(() => {
     if (drawVertices.length === 0) return null;
     const features: any[] = [];
     if (drawVertices.length >= 2) {
@@ -859,17 +860,12 @@ export function MapView() {
     return { type: "FeatureCollection", features };
   }, [drawVertices, localEditMode]);
 
-  const cursorStyle =
-    localEditMode === "add-point" || localEditMode === "draw-line" || localEditMode === "draw-polygon"
-      ? "crosshair"
-      : localEditMode === "select" ? "pointer" : "grab";
   const isDrawing       = localEditMode === "draw-line" || localEditMode === "draw-polygon";
   const showConfirmDraw = isDrawing && drawVertices.length >= 2;
+  const cursorStyle     = localEditMode === "add-point" || isDrawing ? "crosshair" : "default";
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* Edit toolbar */}
       {activeDatasetId !== null && activeDataset !== null && (
         <EditToolbar
           editMode={localEditMode}
@@ -881,15 +877,8 @@ export function MapView() {
         />
       )}
 
-      {/* Pending changes bar */}
-      <PendingBar
-        pending={pendingChanges}
-        onSaveAll={saveAllPending}
-        onDiscard={discardPending}
-        saving={savingAll}
-      />
+      <PendingBar pending={pendingChanges} onSaveAll={saveAllPending} onDiscard={discardPending} saving={savingAll} />
 
-      {/* Draw confirm */}
       {showConfirmDraw && (
         <ConfirmBar
           label={`Finish ${localEditMode === "draw-line" ? "line" : "polygon"} (${drawVertices.length} pts)?`}
@@ -898,16 +887,14 @@ export function MapView() {
         />
       )}
 
-      {/* Attribute modal */}
       {showAttrModal && selectedFeature && (
         <AttributeModal
           title={attrModalIsNew ? "New Feature — Fill Attributes" : "Edit Attributes"}
           feature={selectedFeature}
           table={activeTable}
           isNew={attrModalIsNew}
-          schemaKeys={attrModalIsNew ? datasetSchema : undefined}
+          schemaKeys={attrModalIsNew ? activeSchema : undefined}
           onClose={() => {
-            // Cancel new-feature: remove the green dot we already placed
             if (attrModalIsNew) {
               setEditFeatures((fs) => fs.filter((f) => f.id !== selectedFeature.id));
               setPendingChanges((p) =>
@@ -921,7 +908,6 @@ export function MapView() {
         />
       )}
 
-      {/* Feature popup */}
       {selectedFeature && !showAttrModal && (
         <FeaturePopup
           feature={selectedFeature}
@@ -933,7 +919,6 @@ export function MapView() {
         />
       )}
 
-      {/* Draw hint */}
       {isDrawing && (
         <div style={{
           position: "absolute", top: 60, left: "50%", transform: "translateX(-50%)",
@@ -944,84 +929,65 @@ export function MapView() {
         </div>
       )}
 
-      {/* Zoom + mode */}
       <div style={{
         position: "absolute", bottom: 12, right: 12, zIndex: 999,
         background: "rgba(0,0,0,0.65)", color: "#fff",
         fontFamily: "monospace", fontSize: 13,
         padding: "4px 10px", borderRadius: 6, pointerEvents: "none",
       }}>
-        z: {(viewState as any).zoom?.toFixed(2) ?? "—"}
+        z: {deckViewState.zoom?.toFixed(2) ?? "—"}
         {activeDatasetId && <span style={{ marginLeft: 10, color: "#f59e0b" }}>✏️ {localEditMode}</span>}
       </div>
 
-      {/* ── DeckGL + Map ───────────────────────────────────────────────────── */}
-      {/* ref div so we can querySelector("canvas") for the native click listener */}
-      <div ref={deckRef} style={{ position: "absolute", inset: 0 }}>
       <DeckGL
-        viewState={viewState as any}
-        controller={
-          localEditMode === "none"
-            ? true
-            : { dragPan: true, scrollZoom: true, doubleClickZoom: false, dragRotate: false }
-        }
-        onViewStateChange={({ viewState: vs }: any) => setViewState(vs)}
-        style={{
-          cursor:
-            localEditMode === "add-point" || localEditMode === "draw-line" || localEditMode === "draw-polygon"
-              ? "crosshair"
-              : "pointer",
-        } as any}
+        style={{ position: "absolute", inset: 0, cursor: cursorStyle }}
+        viewState={deckViewState}
+        controller={{ dragPan: true, scrollZoom: true, doubleClickZoom: false, dragRotate: true }}
+        onViewStateChange={({ viewState: vs }: any) => {
+          // During a transition DeckGL emits intermediate states — let it run.
+          // We only strip transition fields from what we store back in deckViewState
+          // so they don't accumulate, but we don't block the update.
+          const { transitionInterpolator: _ti, ...rest } = vs;
+          setDeckViewState(rest);
+          // Keep the Zustand store loosely in sync (for any external readers)
+          const { transitionDuration: _td, ...forStore } = rest;
+          setViewState(forStore);
+        }}
+        onClick={handleDeckClick}
       >
         <Map
           ref={mapRef}
           reuseMaps={false}
           mapStyle={BASEMAP}
-          style={{
-            cursor: localEditMode === "add-point" || localEditMode === "draw-line" || localEditMode === "draw-polygon"
-              ? "crosshair"
-              : "pointer",
-          }}
           onLoad={() => console.log("Map loaded")}
           onError={(e: any) => console.error("MapLibre error:", e)}
         >
-          {/*
-            ── Vector tile sources ──────────────────────────────────────────
-            FIX for "features disappear at zoom 4–10":
-            • minzoom=0 / maxzoom=22 — force tile requests at every zoom
-            • promoteId="id" — lift PK into feature.id for queryRenderedFeatures
-            • ?v= cache-bust — fresh tiles after edits
-            Martin derives the source-layer name from the table name ("points",
-            "lines", "polygons") — make sure source-layer matches exactly.
-          */}
-          <Source key={`pts-${tileKey}`}  id="points-source"   type="vector"
-            tiles={[`${POINTS_TILES}?v=${tileKey}`]}   minzoom={0} maxzoom={22} promoteId="id"
+          <Source key={`pts-${tileKey}`} id="points-source" type="vector"
+            tiles={[`${POINTS_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={22} promoteId="id"
           />
-          <Source key={`lns-${tileKey}`}  id="lines-source"    type="vector"
-            tiles={[`${LINES_TILES}?v=${tileKey}`]}    minzoom={0} maxzoom={22} promoteId="id"
+          <Source key={`lns-${tileKey}`} id="lines-source" type="vector"
+            tiles={[`${LINES_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={22} promoteId="id"
           />
-          <Source key={`pgs-${tileKey}`}  id="polygons-source" type="vector"
+          <Source key={`pgs-${tileKey}`} id="polygons-source" type="vector"
             tiles={[`${POLYGONS_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={22} promoteId="id"
           />
 
-          {/* Dataset layers */}
           {vectorDatasets.flatMap((dataset) =>
             layers
               .filter((l) => l.visible && l.datasetId === dataset.id)
               .flatMap((layer) => {
-                const color: string        = rgbToCss(layer.color);
+                const color     = rgbToCss(layer.color);
                 const dsFilter: any = ["==", ["get", "dataset_id"], dataset.datasetId];
 
                 if (layer.type === "circle") return [
                   <Layer key={layer.id} id={layer.id}
                     type="circle" source="points-source" source-layer="points"
                     filter={dsFilter} minzoom={0} maxzoom={24}
-                    layout={{ visibility: "visible" }}
                     paint={{
                       "circle-color":        color,
                       "circle-opacity":      layer.opacity,
                       "circle-radius":       ["interpolate", ["linear"], ["zoom"], 0,4, 6,6, 10,7, 14,8, 18,10],
-                      "circle-stroke-width": 1,
+                      "circle-stroke-width": 1.5,
                       "circle-stroke-color": "#fff",
                     }}
                   />,
@@ -1031,7 +997,7 @@ export function MapView() {
                   <Layer key={layer.id} id={layer.id}
                     type="line" source="lines-source" source-layer="lines"
                     filter={dsFilter} minzoom={0} maxzoom={24}
-                    layout={{ visibility: "visible", "line-cap": "round", "line-join": "round" }}
+                    layout={{ "line-cap": "round", "line-join": "round" }}
                     paint={{
                       "line-color":   color,
                       "line-opacity": layer.opacity,
@@ -1044,13 +1010,12 @@ export function MapView() {
                   <Layer key={`${layer.id}-fill`} id={`${layer.id}-fill`}
                     type="fill" source="polygons-source" source-layer="polygons"
                     filter={dsFilter} minzoom={0} maxzoom={24}
-                    layout={{ visibility: "visible" }}
                     paint={{ "fill-color": color, "fill-opacity": layer.opacity * 0.5 }}
                   />,
                   <Layer key={`${layer.id}-outline`} id={`${layer.id}-outline`}
                     type="line" source="polygons-source" source-layer="polygons"
                     filter={dsFilter} minzoom={0} maxzoom={24}
-                    layout={{ visibility: "visible", "line-cap": "round", "line-join": "round" }}
+                    layout={{ "line-cap": "round", "line-join": "round" }}
                     paint={{
                       "line-color":   color,
                       "line-opacity": layer.opacity,
@@ -1063,7 +1028,6 @@ export function MapView() {
               })
           )}
 
-          {/* Draw preview */}
           {drawPreviewGeoJSON && (
             <>
               <Source id="draw-preview" type="geojson" data={drawPreviewGeoJSON as any} />
@@ -1078,7 +1042,6 @@ export function MapView() {
             </>
           )}
 
-          {/* Editable point markers */}
           {localEditMode !== "none" &&
             editFeatures.filter((f) => f.geometry?.type === "Point").map((f) => {
               const [lng, lat] = f.geometry.coordinates;
@@ -1101,7 +1064,6 @@ export function MapView() {
               );
             })}
 
-          {/* Vertex markers for lines/polygons */}
           {localEditMode !== "none" &&
             editFeatures
               .filter((f) => f.geometry?.type === "LineString" || f.geometry?.type === "Polygon")
@@ -1128,11 +1090,6 @@ export function MapView() {
               })}
         </Map>
       </DeckGL>
-      </div>
-
-      {/* ── Click capture ─────────────────────────────────────────────────────
-           The native click listener on the canvas (attached in useEffect above)
-           handles all interactions — no overlay div needed.                    */}
     </>
   );
 }

@@ -28,6 +28,8 @@ export type ViewState = {
   zoom: number;
   pitch: number;
   bearing: number;
+  // Optional — used when programmatically flying to a location
+  transitionDuration?: number;
 };
 
 // ── Editing ──────────────────────────────────────────────────────────────────

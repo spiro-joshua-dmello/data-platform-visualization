@@ -2,15 +2,27 @@ import { create } from "zustand";
 import type { Dataset, LayerConfig, ViewState, Bounds } from "./types";
 import { boundsToViewState } from "./utils";
 
+type ZoomTarget = {
+  longitude: number;
+  latitude: number;
+  zoom: number;
+  id: number; // monotonically increasing, so MapView can detect new targets
+};
+
 type AppState = {
   datasets: Dataset[];
   layers: LayerConfig[];
   viewState: ViewState;
 
+  // Separate from viewState so MapView can react to it without a feedback loop
+  zoomTarget: ZoomTarget | null;
+
   uploadOpen: boolean;
   setUploadOpen: (open: boolean) => void;
 
-  // ── Edit mode — shared between EditPanel (sidebar) and MapView ─────────────
+  // Track datasets the user explicitly removed from the map this session.
+  removedFromMapIds: Set<string>;
+
   activeDatasetId: string | null;
   setActiveDatasetId: (id: string | null) => void;
 
@@ -26,6 +38,8 @@ type AppState = {
   zoomToLayer: (layerId: string) => void;
 };
 
+let _zoomTargetId = 0;
+
 export const useAppStore = create<AppState>((set) => ({
   datasets: [],
   layers: [],
@@ -38,25 +52,37 @@ export const useAppStore = create<AppState>((set) => ({
     bearing: 0,
   },
 
+  zoomTarget: null,
+
   uploadOpen: true,
   setUploadOpen: (open) => set({ uploadOpen: open }),
 
-  // Edit
+  removedFromMapIds: new Set<string>(),
+
   activeDatasetId: null,
   setActiveDatasetId: (id) => set({ activeDatasetId: id }),
 
   addDataset: (d) =>
     set((s) => ({
       datasets: [d, ...s.datasets.filter((existing) => existing.id !== d.id)],
+      removedFromMapIds: (() => {
+        const next = new Set(s.removedFromMapIds);
+        next.delete(d.id);
+        return next;
+      })(),
     })),
 
   removeDataset: (id) =>
-    set((s) => ({
-      datasets: s.datasets.filter((d) => d.id !== id),
-      layers: s.layers.filter((l) => l.datasetId !== id),
-      // Clear active edit if this dataset was being edited
-      activeDatasetId: s.activeDatasetId === id ? null : s.activeDatasetId,
-    })),
+    set((s) => {
+      const next = new Set(s.removedFromMapIds);
+      next.add(id);
+      return {
+        datasets: s.datasets.filter((d) => d.id !== id),
+        layers: s.layers.filter((l) => l.datasetId !== id),
+        activeDatasetId: s.activeDatasetId === id ? null : s.activeDatasetId,
+        removedFromMapIds: next,
+      };
+    }),
 
   addLayer: (l) =>
     set((s) => ({
@@ -87,16 +113,19 @@ export const useAppStore = create<AppState>((set) => ({
       if (!dataset) return state;
 
       const bounds: Bounds | null = dataset.bounds ?? null;
-      if (!bounds) return state;
+      if (!bounds) {
+        console.warn("zoomToLayer: dataset has no bounds", dataset);
+        return state;
+      }
 
       const view = boundsToViewState(bounds);
 
       return {
-        viewState: {
-          ...state.viewState,
-          ...view,
-          pitch: 0,
-          bearing: 0,
+        zoomTarget: {
+          longitude: view.longitude,
+          latitude:  view.latitude,
+          zoom:      view.zoom,
+          id:        ++_zoomTargetId,
         },
       };
     }),

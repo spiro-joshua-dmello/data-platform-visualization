@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { MapView } from "./MapView";
 import { UploadPanel } from "./panels/UploadPanel";
 import { DatasetPanel } from "./panels/DatasetPanel";
@@ -6,12 +6,38 @@ import { LayerPanel } from "./panels/LayerPanel";
 import { CatalogPanel } from "./panels/CatalogPanel";
 import { EditPanel } from "./panels/EditPanel";
 import { useAppStore } from "./store";
+import { dbRowToStoreEntries } from "./panels/CatalogPanel";
+
+const API = "http://localhost:8787";
 
 type Tab = "layers" | "datasets" | "edit";
 
 export default function App() {
-  const { uploadOpen, setUploadOpen, activeDatasetId } = useAppStore();
+  const { uploadOpen, setUploadOpen, activeDatasetId, addDataset, addLayer, layers, datasets, removedFromMapIds } = useAppStore();
   const [tab, setTab] = useState<Tab>("layers");
+
+  // ── One-time startup sync: restore datasets from DB that aren't in store ──
+  // This handles page refresh. Runs once per session, not per tab switch.
+  useEffect(() => {
+    fetch(`${API}/datasets`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.ok) return;
+        for (const row of data.datasets) {
+          const alreadyInStore = datasets.some((d: any) => d.id === row.id);
+          const userRemovedIt  = removedFromMapIds.has(row.id);
+          if (!alreadyInStore && !userRemovedIt) {
+            const { dataset, layer } = dbRowToStoreEntries(row);
+            addDataset(dataset);
+            if (!layers.some((l: any) => l.datasetId === row.id)) {
+              addLayer(layer);
+            }
+          }
+        }
+      })
+      .catch(() => {/* backend might not be running yet */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // truly once on mount
 
   return (
     <div
