@@ -1,6 +1,5 @@
 # Martin tile server config
 # Mount this as /config.yaml inside the martin container
-
 postgres:
   connection_string: postgres://postgres:postgres@db:5432/kepler
 
@@ -16,8 +15,6 @@ tables:
     buffer: 64
     extent: 4096
     clip_geom: false
-    geometry_type: POINT
-    simplify_until: 0   # ADD THIS — disable simplification
     properties:
       dataset_id: text
 
@@ -32,8 +29,6 @@ tables:
     buffer: 64
     extent: 4096
     clip_geom: false
-    geometry_type: LINESTRING
-    simplify_until: 0   # ADD THIS — disable simplification
     properties:
       dataset_id: text
 
@@ -45,10 +40,8 @@ tables:
     id_column: id
     minzoom: 0
     maxzoom: 24
-    buffer: 256        # increase from 64
+    buffer: 256
     extent: 4096
     clip_geom: false
-    geometry_type: MULTIPOLYGON
-    simplify_until: 100  # disable simplification entirely
     properties:
       dataset_id: text

@@ -28,7 +28,9 @@ services:
       RUST_LOG: info
     ports:
       - "3000:3000"
-    command: ["postgres://postgres:postgres@db:5432/kepler"]
+    volumes:
+      - ./martin.yaml:/config.yaml    
+    command: ["--config", "/config.yaml"]
 
 volumes:
   pg_data:

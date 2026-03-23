@@ -507,14 +507,26 @@ export function MapView() {
     if (zoomTarget.id === lastZoomTargetId.current) return;
     lastZoomTargetId.current = zoomTarget.id;
 
+    const { longitude, latitude, zoom } = zoomTarget;
+
+    // Safety guard — reject invalid values before they crash MapLibre
+    if (
+      !Number.isFinite(latitude)  || !Number.isFinite(longitude) || !Number.isFinite(zoom) ||
+      latitude < -90 || latitude > 90 ||
+      longitude < -180 || longitude > 180
+    ) {
+      console.warn("Skipping invalid zoomTarget:", zoomTarget);
+      return;
+    }
+
     setDeckViewState((prev: any) => ({
       ...prev,
-      longitude:              zoomTarget.longitude,
-      latitude:               zoomTarget.latitude,
-      zoom:                   zoomTarget.zoom,
-      pitch:                  0,
-      bearing:                0,
-      transitionDuration:     1200,
+      longitude,
+      latitude,
+      zoom,
+      pitch: 0,
+      bearing: 0,
+      transitionDuration: 1200,
       transitionInterpolator: new FlyToInterpolator({ speed: 1.5 }),
     }));
   }, [zoomTarget]);
