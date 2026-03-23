@@ -64,17 +64,41 @@ export function dbRowToStoreEntries(row: DBDataset): { dataset: Dataset; layer: 
   return { dataset, layer };
 }
 
+// Fetch bounds for a single dataset directly from the DB response
+async function fetchBoundsForDataset(
+  datasetId: string
+): Promise<[number, number, number, number] | null> {
+  try {
+    const res = await fetch(`${API}/datasets`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const row = (data.datasets ?? []).find((d: any) => d.id === datasetId);
+    if (!row) return null;
+    // bounds comes back as array [minLng, minLat, maxLng, maxLat] or null
+    if (
+      Array.isArray(row.bounds) &&
+      row.bounds.length === 4 &&
+      row.bounds.every((v: any) => typeof v === "number" && isFinite(v))
+    ) {
+      return row.bounds as [number, number, number, number];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function CatalogPanel() {
   const {
     datasets, layers,
     addDataset, addLayer, removeDataset, removeLayer,
-    removedFromMapIds,
   } = useAppStore();
 
   const [catalog, setCatalog] = useState<DBDataset[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [addingToMap, setAddingToMap] = useState<string | null>(null);
 
   const fetchCatalog = useCallback(async () => {
     setLoading(true);
@@ -94,8 +118,6 @@ export function CatalogPanel() {
     }
   }, []);
 
-  // Only fetch the catalog list — do NOT auto-add to map.
-  // Auto-sync on page refresh is handled once in App.tsx.
   useEffect(() => {
     fetchCatalog();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -117,11 +139,38 @@ export function CatalogPanel() {
     }
   }
 
-  function handleAddToMap(row: DBDataset) {
-    const { dataset, layer } = dbRowToStoreEntries(row);
-    addDataset(dataset);
-    if (!layers.some((l) => l.datasetId === row.id)) {
-      addLayer(layer);
+  async function handleAddToMap(row: DBDataset) {
+    setAddingToMap(row.id);
+    try {
+      // Always fetch fresh bounds — row.bounds from the initial catalog load
+      // may be null if the lateral join returned nothing at list time.
+      const freshBounds = await fetchBoundsForDataset(row.id);
+
+      const dataset: Dataset = {
+        id:         row.id,
+        name:       row.name,
+        type:       "vector-tile",
+        datasetId:  row.id,
+        renderType: renderTypeFromKind(row.kind),
+        bounds:     freshBounds,   // use fresh bounds, not stale row.bounds
+      };
+
+      const layer: LayerConfig = {
+        id:        `${row.id}-layer`,
+        datasetId: row.id,
+        name:      row.name,
+        type:      layerTypeFromKind(row.kind),
+        visible:   true,
+        opacity:   1,
+        color:     [0, 128, 255],
+      };
+
+      addDataset(dataset);
+      if (!layers.some((l) => l.datasetId === row.id)) {
+        addLayer(layer);
+      }
+    } finally {
+      setAddingToMap(null);
     }
   }
 
@@ -179,6 +228,7 @@ export function CatalogPanel() {
       {catalog.map((row) => {
         const onMap          = isOnMap(row.id);
         const isBeingDeleted = deleting === row.id;
+        const isAdding       = addingToMap === row.id;
 
         return (
           <div
@@ -225,12 +275,17 @@ export function CatalogPanel() {
 
             <div style={{ display: "flex", gap: 6 }}>
               {!onMap ? (
-                <button onClick={() => handleAddToMap(row)} style={{
-                  flex: 1, padding: "6px 0", background: "#1e3a5f",
-                  border: "1px solid #2a5298", borderRadius: 6, color: "#60a5fa",
-                  fontSize: 12, cursor: "pointer", fontWeight: 600,
-                }}>
-                  + Add to map
+                <button
+                  onClick={() => void handleAddToMap(row)}
+                  disabled={isAdding}
+                  style={{
+                    flex: 1, padding: "6px 0", background: "#1e3a5f",
+                    border: "1px solid #2a5298", borderRadius: 6, color: "#60a5fa",
+                    fontSize: 12, cursor: isAdding ? "wait" : "pointer", fontWeight: 600,
+                    opacity: isAdding ? 0.7 : 1,
+                  }}
+                >
+                  {isAdding ? "Adding…" : "+ Add to map"}
                 </button>
               ) : (
                 <button onClick={() => handleRemoveFromMap(row)} style={{

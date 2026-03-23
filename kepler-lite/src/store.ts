@@ -1,12 +1,11 @@
 import { create } from "zustand";
 import type { Dataset, LayerConfig, ViewState, Bounds } from "./types";
-import { boundsToViewState } from "./utils";
 
 type ZoomTarget = {
   longitude: number;
   latitude: number;
   zoom: number;
-  id: number; // monotonically increasing, so MapView can detect new targets
+  id: number;
 };
 
 type AppState = {
@@ -14,13 +13,12 @@ type AppState = {
   layers: LayerConfig[];
   viewState: ViewState;
 
-  // Separate from viewState so MapView can react to it without a feedback loop
   zoomTarget: ZoomTarget | null;
+  setZoomTarget: (target: { longitude: number; latitude: number; zoom: number }) => void;
 
   uploadOpen: boolean;
   setUploadOpen: (open: boolean) => void;
 
-  // Track datasets the user explicitly removed from the map this session.
   removedFromMapIds: Set<string>;
 
   activeDatasetId: string | null;
@@ -34,8 +32,6 @@ type AppState = {
   removeLayer: (id: string) => void;
 
   setViewState: (patch: Partial<ViewState>) => void;
-
-  zoomToLayer: (layerId: string) => void;
 };
 
 let _zoomTargetId = 0;
@@ -53,6 +49,16 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   zoomTarget: null,
+
+  setZoomTarget: (target) =>
+    set({
+      zoomTarget: {
+        longitude: target.longitude,
+        latitude:  target.latitude,
+        zoom:      target.zoom,
+        id:        ++_zoomTargetId,
+      },
+    }),
 
   uploadOpen: true,
   setUploadOpen: (open) => set({ uploadOpen: open }),
@@ -103,30 +109,4 @@ export const useAppStore = create<AppState>((set) => ({
     set((s) => ({
       viewState: { ...s.viewState, ...patch },
     })),
-
-  zoomToLayer: (layerId) =>
-    set((state) => {
-      const layer = state.layers.find((l) => l.id === layerId);
-      if (!layer) return state;
-
-      const dataset = state.datasets.find((d) => d.id === layer.datasetId);
-      if (!dataset) return state;
-
-      const bounds: Bounds | null = dataset.bounds ?? null;
-      if (!bounds) {
-        console.warn("zoomToLayer: dataset has no bounds", dataset);
-        return state;
-      }
-
-      const view = boundsToViewState(bounds);
-
-      return {
-        zoomTarget: {
-          longitude: view.longitude,
-          latitude:  view.latitude,
-          zoom:      view.zoom,
-          id:        ++_zoomTargetId,
-        },
-      };
-    }),
 }));

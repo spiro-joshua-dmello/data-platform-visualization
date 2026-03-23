@@ -1204,6 +1204,12 @@ app.delete("/features/:table/:featureId", async (c) => {
   return c.json({ ok: true });
 });
 
+// GET /datasets/:datasetId/bounds — dedicated bounds endpoint
+app.get("/datasets/:datasetId/bounds", async (c) => {
+  const { datasetId } = c.req.param();
+  const bounds = await getDatasetBounds(datasetId);
+  return c.json({ ok: true, bounds });
+});
 // ── Start server ──────────────────────────────────────────────────────────────
 
 serve({

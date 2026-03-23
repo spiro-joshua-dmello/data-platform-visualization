@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import DeckGL from "@deck.gl/react";
+import { FlyToInterpolator } from "@deck.gl/core";
 import Map, { Source, Layer, Marker } from "react-map-gl/maplibre";
 import { useAppStore } from "./store";
 
@@ -88,7 +89,6 @@ function AttributeModal({
   onSaved: (updated: GeoFeature) => void;
 }) {
   const buildInitial = (): Record<string, string> => {
-    // For new features: pre-populate with schema keys as empty strings
     if (isNew && schemaKeys && schemaKeys.length > 0) {
       return Object.fromEntries(schemaKeys.map((k) => [k, ""]));
     }
@@ -181,7 +181,6 @@ function AttributeModal({
           </div>
         )}
 
-        {/* Attribute fields — either from schema or from existing props */}
         {keys.length > 0 && (
           <div style={{ display: "grid", gap: 10 }}>
             {keys.map((k) => (
@@ -206,7 +205,6 @@ function AttributeModal({
           <div style={{ fontSize: 13, color: "#a5adbb" }}>No editable attributes.</div>
         )}
 
-        {/* Add new attribute column — always available */}
         <div style={{
           border: "1px dashed #3a4255", borderRadius: 8, padding: 12, display: "grid", gap: 8,
         }}>
@@ -490,7 +488,7 @@ export function MapView() {
     zoomTarget,
   } = useAppStore();
 
-  // DeckGL owns its view state. Seeded from store once, then driven by user interaction.
+  // Controlled view state — DeckGL reads this every render
   const [deckViewState, setDeckViewState] = useState<any>({
     longitude: viewState.longitude,
     latitude:  viewState.latitude,
@@ -499,20 +497,26 @@ export function MapView() {
     bearing:   viewState.bearing ?? 0,
   });
 
-  // React to zoomTarget changes (set by LayerPanel "Zoom" button via store.zoomToLayer)
+  // Refs must be inside the component
+  const mapRef = useRef<any>(null);
   const lastZoomTargetId = useRef<number>(-1);
+
+  // ── Zoom to layer via DeckGL FlyToInterpolator ───────────────────────────
   useEffect(() => {
     if (!zoomTarget) return;
     if (zoomTarget.id === lastZoomTargetId.current) return;
     lastZoomTargetId.current = zoomTarget.id;
-    setDeckViewState({
-      longitude:          zoomTarget.longitude,
-      latitude:           zoomTarget.latitude,
-      zoom:               zoomTarget.zoom,
-      pitch:              0,
-      bearing:            0,
-      transitionDuration: 900,
-    });
+
+    setDeckViewState((prev: any) => ({
+      ...prev,
+      longitude:              zoomTarget.longitude,
+      latitude:               zoomTarget.latitude,
+      zoom:                   zoomTarget.zoom,
+      pitch:                  0,
+      bearing:                0,
+      transitionDuration:     1200,
+      transitionInterpolator: new FlyToInterpolator({ speed: 1.5 }),
+    }));
   }, [zoomTarget]);
 
   const [editFeatures, setEditFeatures]       = useState<GeoFeature[]>([]);
@@ -525,10 +529,7 @@ export function MapView() {
   const [pendingChanges, setPendingChanges]   = useState<PendingChange[]>([]);
   const [savingAll, setSavingAll]             = useState(false);
   const [tileKey, setTileKey]                 = useState(0);
-  // Schema fetched from server for the active dataset (used in add-point modal)
   const [serverSchema, setServerSchema]       = useState<string[]>([]);
-
-  const mapRef = useRef<any>(null);
 
   // When activeDatasetId changes, reset edit state
   useEffect(() => {
@@ -542,7 +543,7 @@ export function MapView() {
     }
   }, [activeDatasetId]);
 
-  // Fetch schema for active dataset whenever it changes (for add-point modal)
+  // Fetch schema for active dataset
   useEffect(() => {
     if (!activeDatasetId) { setServerSchema([]); return; }
 
@@ -558,7 +559,6 @@ export function MapView() {
       .then((fc) => {
         const features = fc.features ?? [];
         if (features.length === 0) { setServerSchema([]); return; }
-        // Collect unique keys from first feature's properties
         const seen = new Set<string>();
         const keys: string[] = [];
         for (const f of features.slice(0, 5)) {
@@ -578,7 +578,6 @@ export function MapView() {
     activeDataset?.renderType === "point" ? "points" :
     activeDataset?.renderType === "line"  ? "lines"  : "polygons";
 
-  // Schema from locally loaded features (takes precedence if available)
   const localSchema: string[] = useMemo(() => {
     const seen = new Set<string>();
     const keys: string[] = [];
@@ -593,7 +592,6 @@ export function MapView() {
     return keys;
   }, [editFeatures]);
 
-  // Use local schema if we have loaded features, otherwise server schema
   const activeSchema = localSchema.length > 0 ? localSchema : serverSchema;
 
   // ── DeckGL onClick ────────────────────────────────────────────────────────
@@ -603,7 +601,6 @@ export function MapView() {
     const pixelX: number = info.x;
     const pixelY: number = info.y;
 
-    // add-point
     if (localEditMode === "add-point" && activeDatasetId) {
       if (!info.coordinate) return;
       const [lng, lat] = info.coordinate as [number, number];
@@ -620,7 +617,6 @@ export function MapView() {
       return;
     }
 
-    // draw-line / draw-polygon
     if ((localEditMode === "draw-line" || localEditMode === "draw-polygon") && activeDatasetId) {
       if (!info.coordinate) return;
       const [lng, lat] = info.coordinate as [number, number];
@@ -628,7 +624,6 @@ export function MapView() {
       return;
     }
 
-    // inspect / select via MapLibre queryRenderedFeatures
     const map = mapRef.current?.getMap?.();
     if (!map) return;
 
@@ -943,15 +938,13 @@ export function MapView() {
         style={{ position: "absolute", inset: 0, cursor: cursorStyle }}
         viewState={deckViewState}
         controller={{ dragPan: true, scrollZoom: true, doubleClickZoom: false, dragRotate: true }}
-        onViewStateChange={({ viewState: vs }: any) => {
-          // During a transition DeckGL emits intermediate states — let it run.
-          // We only strip transition fields from what we store back in deckViewState
-          // so they don't accumulate, but we don't block the update.
-          const { transitionInterpolator: _ti, ...rest } = vs;
-          setDeckViewState(rest);
-          // Keep the Zustand store loosely in sync (for any external readers)
-          const { transitionDuration: _td, ...forStore } = rest;
-          setViewState(forStore);
+        onViewStateChange={({ viewState: vs, interactionState }: any) => {
+          // During a programmatic transition, DeckGL emits intermediate states.
+          // We must pass those back AS-IS (with transitionInterpolator intact)
+          // so the animation isn't cancelled. Strip transition props only for zustand.
+          setDeckViewState(vs);
+          const { transitionInterpolator: _ti, transitionDuration: _td, ...rest } = vs;
+          setViewState(rest);
         }}
         onClick={handleDeckClick}
       >

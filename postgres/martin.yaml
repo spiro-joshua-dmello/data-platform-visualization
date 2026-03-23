@@ -17,6 +17,7 @@ tables:
     extent: 4096
     clip_geom: false
     geometry_type: POINT
+    simplify_until: 0   # ADD THIS — disable simplification
     properties:
       dataset_id: text
 
@@ -32,6 +33,7 @@ tables:
     extent: 4096
     clip_geom: false
     geometry_type: LINESTRING
+    simplify_until: 0   # ADD THIS — disable simplification
     properties:
       dataset_id: text
 
