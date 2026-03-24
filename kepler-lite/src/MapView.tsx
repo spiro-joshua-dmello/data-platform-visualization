@@ -968,13 +968,13 @@ export function MapView() {
           onError={(e: any) => console.error("MapLibre error:", e)}
         >
           <Source key={`pts-${tileKey}`} id="points-source" type="vector"
-            tiles={[`${POINTS_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={22} promoteId="id"
+            tiles={[`${POINTS_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={24} promoteId="id"
           />
           <Source key={`lns-${tileKey}`} id="lines-source" type="vector"
-            tiles={[`${LINES_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={22} promoteId="id"
+            tiles={[`${LINES_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={24} promoteId="id"
           />
           <Source key={`pgs-${tileKey}`} id="polygons-source" type="vector"
-            tiles={[`${POLYGONS_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={22} promoteId="id"
+            tiles={[`${POLYGONS_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={24} promoteId="id"
           />
 
           {vectorDatasets.flatMap((dataset) =>

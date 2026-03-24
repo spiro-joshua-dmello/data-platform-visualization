@@ -2,6 +2,8 @@
 # Mount this as /config.yaml inside the martin container
 postgres:
   connection_string: postgres://postgres:postgres@db:5432/kepler
+  default_srid: 4326
+  pool_size: 20
 
 tables:
   points:
