@@ -298,9 +298,9 @@ async function streamGeoJSONIntoDB(
              END,
              4326
            ),
-           $3::jsonb
+           to_json($3::text)::jsonb
          )`,
-        [datasetId, JSON.stringify(geom), JSON.stringify(props), geom.type]
+        [datasetId, JSON.stringify(geom), sql.json(props), geom.type]
       );
       inserted++;
     }
@@ -308,11 +308,9 @@ async function streamGeoJSONIntoDB(
     if (totalFlushed % 5000 === 0) {
       console.log(`[chunked] inserted ${totalFlushed} features so far...`);
     }
-    
     batch = [];
   };
 
-  // Peek at first 300 bytes to detect FeatureCollection vs bare array
   const headBuf = Buffer.alloc(300);
   const peekFd = await open(filePath, "r");
   await peekFd.read(headBuf, 0, 300, 0);
@@ -414,7 +412,7 @@ async function streamCSVIntoDB(
 
       await tx.unsafe(
         `INSERT INTO points (dataset_id, geom, props)
-         VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4::jsonb)`,
+         VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), to_json($3::text)::jsonb)`,
         [datasetId, lng, lat, JSON.stringify({ ...r, dataset_id: datasetId })]
       );
       inserted++;
@@ -610,9 +608,9 @@ app.post("/datasets/upload", async (c) => {
                END,
                4326
              ),
-             $3::jsonb
+             to_json($3::text)::jsonb
            )`,
-          [datasetId, JSON.stringify(geom), JSON.stringify(props), geom.type]
+          [datasetId, JSON.stringify(geom), sql.json(props), geom.type]
         );
 
         inserted++;
@@ -630,7 +628,6 @@ app.post("/datasets/upload", async (c) => {
     const suggestedLayerType = inferSuggestedLayerTypeFromGeomTypes(geometryTypes);
     const renderType = inferDatasetRenderType(geometryTypes);
     const bounds = await getDatasetBounds(datasetId);
-    // Register in catalog
     await registerDataset(datasetId, file.name, renderType);
     return c.json({
       ok: true,
@@ -710,8 +707,8 @@ app.post("/datasets/upload", async (c) => {
 
         await tx.unsafe(
           `INSERT INTO points (dataset_id, geom, props)
-           VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4::jsonb)`,
-          [datasetId, lng, lat, JSON.stringify(props)]
+           VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), to_json($3::text)::jsonb)`,
+          [datasetId, lng, lat, sql.json(props)]
         );
 
         inserted++;
@@ -726,7 +723,6 @@ app.post("/datasets/upload", async (c) => {
     }
 
     const bounds = await getDatasetBounds(datasetId);
-    // Register in catalog
     await registerDataset(datasetId, file.name, "point");
     return c.json({
       ok: true,
@@ -745,139 +741,6 @@ app.post("/datasets/upload", async (c) => {
   }
 
   return c.json(badRequest("UNSUPPORTED_FILE", "Unsupported file type"), 400);
-});
-
-
-// ── Dataset catalog ──────────────────────────────────────────────────────────
-
-// Register dataset in catalog (call this inside upload handlers)
-async function registerDataset(
-  datasetId: string,
-  name: string,
-  renderType: string
-) {
-  await sql`
-    INSERT INTO datasets (id, name, kind, table_name, created_at)
-    VALUES (
-      ${datasetId}::uuid,
-      ${name},
-      ${renderType},
-      ${renderType === "point" ? "points" : renderType === "line" ? "lines" : "polygons"},
-      now()
-    )
-    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
-  `;
-}
-
-// GET /datasets — list all datasets with feature counts
-app.get("/datasets", async (c) => {
-  const rows = await sql`
-    SELECT
-      d.id,
-      d.name,
-      d.kind,
-      d.table_name,
-      d.created_at,
-      COALESCE(p.cnt, 0) + COALESCE(l.cnt, 0) + COALESCE(pg.cnt, 0) AS feature_count
-    FROM datasets d
-    LEFT JOIN (SELECT dataset_id, COUNT(*) cnt FROM points GROUP BY dataset_id) p ON p.dataset_id = d.id
-    LEFT JOIN (SELECT dataset_id, COUNT(*) cnt FROM lines GROUP BY dataset_id) l ON l.dataset_id = d.id
-    LEFT JOIN (SELECT dataset_id, COUNT(*) cnt FROM polygons pg GROUP BY dataset_id) pg ON pg.dataset_id = d.id
-    ORDER BY d.created_at DESC
-  `;
-  return c.json({ ok: true, datasets: rows });
-});
-
-// DELETE /datasets/:datasetId
-app.delete("/datasets/:datasetId", async (c) => {
-  const { datasetId } = c.req.param();
-  await sql.begin(async (tx) => {
-    await tx`DELETE FROM points WHERE dataset_id = ${datasetId}::uuid`;
-    await tx`DELETE FROM lines WHERE dataset_id = ${datasetId}::uuid`;
-    await tx`DELETE FROM polygons WHERE dataset_id = ${datasetId}::uuid`;
-    await tx`DELETE FROM datasets WHERE id = ${datasetId}::uuid`;
-  });
-  return c.json({ ok: true });
-});
-
-// GET /datasets/:datasetId/features — full GeoJSON for a dataset
-app.get("/datasets/:datasetId/features", async (c) => {
-  const { datasetId } = c.req.param();
-  const table = c.req.query("table") ?? "points"; // points | lines | polygons
-
-  const rows = await sql.unsafe(
-    `SELECT id, props,
-       ST_AsGeoJSON(geom)::json AS geometry
-     FROM ${table}
-     WHERE dataset_id = $1
-     LIMIT 50000`,
-    [datasetId]
-  );
-
-  const features = rows.map((r: any) => ({
-    type: "Feature",
-    id: r.id,
-    geometry: r.geometry,
-    properties: { ...r.props, _fid: r.id },
-  }));
-
-  return c.json({ type: "FeatureCollection", features });
-});
-
-// POST /datasets/:datasetId/features — add a new feature
-app.post("/datasets/:datasetId/features", async (c) => {
-  const { datasetId } = c.req.param();
-  const body = await c.req.json();
-  const { geometry, properties, table } = body;
-
-  const targetTable = table ?? getTargetTable(geometry.type);
-  if (!targetTable) return c.json(badRequest("BAD_GEOM", "Unknown geometry type"), 400);
-
-  const [row] = await sql.unsafe(
-    `INSERT INTO ${targetTable} (dataset_id, geom, props)
-     VALUES ($1, ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), $3::jsonb)
-     RETURNING id`,
-    [datasetId, JSON.stringify(geometry), JSON.stringify({ ...properties, dataset_id: datasetId })]
-  );
-
-  return c.json({ ok: true, id: row.id });
-});
-
-// PATCH /features/:table/:featureId — update geometry and/or props
-app.patch("/features/:table/:featureId", async (c) => {
-  const { table, featureId } = c.req.param();
-  const body = await c.req.json();
-  const { geometry, properties } = body;
-
-  if (!["points", "lines", "polygons"].includes(table)) {
-    return c.json(badRequest("BAD_TABLE", "Invalid table"), 400);
-  }
-
-  if (geometry) {
-    await sql.unsafe(
-      `UPDATE ${table} SET geom = ST_SetSRID(ST_GeomFromGeoJSON($1), 4326),
-       props = COALESCE($2::jsonb, props)
-       WHERE id = $3::uuid`,
-      [JSON.stringify(geometry), properties ? JSON.stringify(properties) : null, featureId]
-    );
-  } else if (properties) {
-    await sql.unsafe(
-      `UPDATE ${table} SET props = $1::jsonb WHERE id = $2::uuid`,
-      [JSON.stringify(properties), featureId]
-    );
-  }
-
-  return c.json({ ok: true });
-});
-
-// DELETE /features/:table/:featureId
-app.delete("/features/:table/:featureId", async (c) => {
-  const { table, featureId } = c.req.param();
-  if (!["points", "lines", "polygons"].includes(table)) {
-    return c.json(badRequest("BAD_TABLE", "Invalid table"), 400);
-  }
-  await sql.unsafe(`DELETE FROM ${table} WHERE id = $1::uuid`, [featureId]);
-  return c.json({ ok: true });
 });
 
 // ── Chunked upload: init ──────────────────────────────────────────────────────
@@ -955,7 +818,6 @@ app.post("/datasets/upload/finalize", async (c) => {
 
   console.log(`[chunked] finalizing uploadId=${uploadId} file=${fileName} chunks=${totalChunks}`);
 
-  // Assemble chunks using fd.write — no streams, no listener leaks
   const assembledPath = join(uploadDir, "assembled");
   const outFd = await open(assembledPath, "w");
 
@@ -1048,6 +910,8 @@ app.post("/datasets/upload/finalize", async (c) => {
   }
 });
 
+// ── Dataset catalog ───────────────────────────────────────────────────────────
+
 // GET /datasets — full catalog with feature counts + bounds
 app.get("/datasets", async (c) => {
   const rows = await sql`
@@ -1058,7 +922,6 @@ app.get("/datasets", async (c) => {
       d.table_name,
       d.created_at,
       COALESCE(p.cnt, 0) + COALESCE(l.cnt, 0) + COALESCE(pg.cnt, 0) AS feature_count,
-      -- bounds
       ST_XMin(ext.b) AS minx,
       ST_YMin(ext.b) AS miny,
       ST_XMax(ext.b) AS maxx,
@@ -1084,7 +947,7 @@ app.get("/datasets", async (c) => {
     ) ext ON true
     ORDER BY d.created_at DESC
   `;
- 
+
   const datasets = rows.map((r: any) => ({
     id:            String(r.id),
     name:          r.name,
@@ -1097,10 +960,10 @@ app.get("/datasets", async (c) => {
         ? [Number(r.minx), Number(r.miny), Number(r.maxx), Number(r.maxy)]
         : null,
   }));
- 
+
   return c.json({ ok: true, datasets });
 });
- 
+
 // DELETE /datasets/:datasetId — wipe all features + catalog row
 app.delete("/datasets/:datasetId", async (c) => {
   const { datasetId } = c.req.param();
@@ -1112,16 +975,16 @@ app.delete("/datasets/:datasetId", async (c) => {
   });
   return c.json({ ok: true });
 });
- 
+
 // GET /datasets/:datasetId/features — full GeoJSON for a dataset
 app.get("/datasets/:datasetId/features", async (c) => {
   const { datasetId } = c.req.param();
   const table = c.req.query("table") ?? "points";
- 
+
   if (!["points", "lines", "polygons"].includes(table)) {
     return c.json(badRequest("BAD_TABLE", "Invalid table"), 400);
   }
- 
+
   const rows = await sql.unsafe(
     `SELECT id::text,
             props,
@@ -1131,53 +994,86 @@ app.get("/datasets/:datasetId/features", async (c) => {
      LIMIT 100000`,
     [datasetId]
   );
- 
-  const features = rows.map((r: any) => ({
-    type:       "Feature",
-    id:         r.id,
-    geometry:   r.geometry,
-    properties: { ...(r.props ?? {}), _fid: r.id },
-  }));
- 
+
+  const features = rows.map((r: any) => {
+      let rawProps = r.props ?? {};
+      if (typeof rawProps === "string") {
+        try { rawProps = JSON.parse(rawProps); } catch { rawProps = {}; }
+      }
+      return {
+        type:       "Feature",
+        id:         r.id,
+        geometry:   r.geometry,
+        properties: { ...rawProps, _fid: r.id },
+      };
+    });
+
   return c.json({ type: "FeatureCollection", features });
 });
- 
+
 // POST /datasets/:datasetId/features — add a single feature
 app.post("/datasets/:datasetId/features", async (c) => {
   const { datasetId } = c.req.param();
   const body        = await c.req.json();
   const { geometry, properties, table } = body as any;
- 
+
   const targetTable: string | null = table ?? getTargetTable(geometry?.type);
   if (!targetTable) return c.json(badRequest("BAD_GEOM", "Unknown geometry type"), 400);
- 
+
   const [row] = await sql.unsafe(
     `INSERT INTO ${targetTable} (dataset_id, geom, props)
-     VALUES ($1::uuid, ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), $3::jsonb)
+     VALUES ($1::uuid, ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), to_json($3::text)::jsonb)
      RETURNING id::text`,
-    [datasetId, JSON.stringify(geometry), JSON.stringify({ ...(properties ?? {}), dataset_id: datasetId })]
+    [datasetId, JSON.stringify(geometry), sql.json({ ...(properties ?? {}), dataset_id: datasetId })]
   );
- 
+
   return c.json({ ok: true, id: (row as any).id });
 });
- 
+
+// GET /features/:table/:featureId — fetch single feature's full properties
+app.get("/features/:table/:featureId", async (c) => {
+  const { table, featureId } = c.req.param();
+  if (!["points", "lines", "polygons"].includes(table)) {
+    return c.json(badRequest("BAD_TABLE", "Invalid table"), 400);
+  }
+  const rows = await sql.unsafe(
+    `SELECT id::text, props, ST_AsGeoJSON(geom)::json AS geometry
+     FROM ${table} WHERE id = $1::uuid`,
+    [featureId]
+  );
+  if (!rows.length) return c.json({ ok: false, error: "Not found" }, 404);
+  const r = rows[0] as any;
+  // props may be stored as a JSON string inside the jsonb column — parse if needed
+  let rawProps = r.props ?? {};
+  if (typeof rawProps === "string") {
+    try { rawProps = JSON.parse(rawProps); } catch { rawProps = {}; }
+  }
+  const props = { ...rawProps };
+  delete props.dataset_id;
+  return c.json({
+    ok: true,
+    properties: { ...props, _fid: r.id },
+    geometry: r.geometry,
+  });
+});
+
 // PATCH /features/:table/:featureId — update geometry and/or props
 app.patch("/features/:table/:featureId", async (c) => {
   const { table, featureId } = c.req.param();
   const body = await c.req.json() as any;
   const { geometry, properties } = body;
- 
+
   if (!["points", "lines", "polygons"].includes(table)) {
     return c.json(badRequest("BAD_TABLE", "Invalid table"), 400);
   }
- 
+
   if (geometry && properties) {
     await sql.unsafe(
       `UPDATE ${table}
        SET geom  = ST_SetSRID(ST_GeomFromGeoJSON($1), 4326),
-           props = $2::jsonb
+           props = to_json($2::text)::jsonb
        WHERE id = $3::uuid`,
-      [JSON.stringify(geometry), JSON.stringify(properties), featureId]
+      [JSON.stringify(properties), featureId]
     );
   } else if (geometry) {
     await sql.unsafe(
@@ -1186,14 +1082,14 @@ app.patch("/features/:table/:featureId", async (c) => {
     );
   } else if (properties) {
     await sql.unsafe(
-      `UPDATE ${table} SET props = $1::jsonb WHERE id = $2::uuid`,
+      `UPDATE ${table} SET props = to_json($1::text)::jsonb WHERE id = $2::uuid`,
       [JSON.stringify(properties), featureId]
     );
   }
- 
+
   return c.json({ ok: true });
 });
- 
+
 // DELETE /features/:table/:featureId
 app.delete("/features/:table/:featureId", async (c) => {
   const { table, featureId } = c.req.param();
@@ -1210,6 +1106,7 @@ app.get("/datasets/:datasetId/bounds", async (c) => {
   const bounds = await getDatasetBounds(datasetId);
   return c.json({ ok: true, bounds });
 });
+
 // ── Start server ──────────────────────────────────────────────────────────────
 
 serve({

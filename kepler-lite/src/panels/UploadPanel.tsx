@@ -5,7 +5,6 @@ import { useAppStore } from "../store";
 import type { Dataset, LayerConfig, RenderType, LayerType } from "../types";
 
 const MAX_MB = 2048;
-// remove CHUNKED_THRESHOLD from here entirely — it lives in api.ts
 
 function prettyError(err: unknown): string {
   const e = err as ApiError | undefined;
@@ -75,10 +74,8 @@ export function UploadPanel() {
         setFileType("geojson");
         const nextRenderType = result.renderType;
         const nextLayerType = result.suggestedLayerType ?? fallbackLayerType(nextRenderType);
-
         setSuggestedLayerType(nextLayerType);
         setRenderType(nextRenderType);
-
         setInfo(
           result.featureCount === -1
             ? `Large GeoJSON detected. Render as ${nextLayerType}.`
@@ -152,9 +149,7 @@ export function UploadPanel() {
         onProgress: (pct) => setProgress(pct),
       });
 
-
       console.log("Upload result:", result);
-
       addUploadedDatasetAndLayer(result, file.name);
       setInfo(`Loaded successfully. Inserted ${result.inserted} record(s).`);
 
@@ -183,24 +178,20 @@ export function UploadPanel() {
   }
 
   return (
-    <div
-      style={{
-        padding: 16,
-        display: "grid",
-        gap: 12,
-        background: "#fff",
-        border: "1px solid #ddd",
-        borderRadius: 8,
-      }}
-    >
+    <div style={{
+      padding: 16,
+      display: "grid",
+      gap: 12,
+      background: "var(--panel-2)",
+      border: "1px solid var(--border)",
+      borderRadius: 8,
+    }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h3 style={{ margin: 0 }}>Upload dataset</h3>
-        <button onClick={() => setUploadOpen(false)} disabled={uploading}>
-          Close
-        </button>
+        <h3 style={{ margin: 0, color: "var(--text)", fontSize: 14, fontWeight: 700 }}>Upload dataset</h3>
+        <button onClick={() => setUploadOpen(false)} disabled={uploading}>Close</button>
       </div>
 
-      <div style={{ fontSize: 13, color: "#555" }}>
+      <div style={{ fontSize: 12, color: "var(--muted)" }}>
         Supported: CSV, GeoJSON, JSON. Max file size: {MAX_MB} MB.
       </div>
 
@@ -212,123 +203,90 @@ export function UploadPanel() {
           if (nextFile) void handlePickFile(nextFile);
         }}
         disabled={uploading || inspecting}
+        style={{ color: "var(--muted)", fontSize: 12 }}
       />
 
       {file && (
-        <div style={{ fontSize: 13, color: "#333", display: "grid", gap: 4 }}>
-          <div>
-            <b>File:</b> {file.name}
-          </div>
-          <div>
-            <b>Size:</b> {(file.size / (1024 * 1024)).toFixed(2)} MB
-          </div>
-          {fileType && (
-            <div>
-              <b>Type:</b> {fileType}
-            </div>
-          )}
-          <div>
-            <b>Render as:</b> {suggestedLayerType}
-          </div>
-          {renderType && (
-            <div>
-              <b>Geometry kind:</b> {renderType}
-            </div>
-          )}
+        <div style={{ fontSize: 12, color: "var(--muted)", display: "grid", gap: 3 }}>
+          <div><span style={{ color: "var(--text)", fontWeight: 600 }}>File:</span> {file.name}</div>
+          <div><span style={{ color: "var(--text)", fontWeight: 600 }}>Size:</span> {(file.size / (1024 * 1024)).toFixed(2)} MB</div>
+          {fileType && <div><span style={{ color: "var(--text)", fontWeight: 600 }}>Type:</span> {fileType}</div>}
+          <div><span style={{ color: "var(--text)", fontWeight: 600 }}>Render as:</span> {suggestedLayerType}</div>
+          {renderType && <div><span style={{ color: "var(--text)", fontWeight: 600 }}>Geometry kind:</span> {renderType}</div>}
         </div>
       )}
 
-      {inspecting && <div>Inspecting file…</div>}
+      {inspecting && <div style={{ fontSize: 12, color: "var(--muted)" }}>Inspecting file…</div>}
 
       {fileType === "csv" && columns.length > 0 && (
         <div style={{ display: "grid", gap: 10 }}>
-          <label style={{ display: "grid", gap: 4 }}>
+          <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
             <span>Latitude column</span>
             <select value={selectedLat} onChange={(e) => setSelectedLat(e.target.value)}>
               <option value="">Select latitude column</option>
-              {columns.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
+              {columns.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
-
-          <label style={{ display: "grid", gap: 4 }}>
+          <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
             <span>Longitude column</span>
             <select value={selectedLng} onChange={(e) => setSelectedLng(e.target.value)}>
               <option value="">Select longitude column</option>
-              {columns.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
+              {columns.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
         </div>
       )}
 
-      
       {uploading && (
         <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 13 }}>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>
             {progress < 80
               ? `Uploading… ${progress}%`
               : progress < 100
               ? `Processing on server… this may take several minutes for large files`
               : `Finalizing…`}
           </div>
-          <div style={{ width: "100%", height: 10, background: "#eee", borderRadius: 999, overflow: "hidden" }}>
-            <div
-              style={{
-                width: `${Math.max(progress, 2)}%`,
-                height: "100%",
-                background: progress >= 80 ? "#f59e0b" : "#2f80ed",
-                transition: "width 120ms ease",
-              }}
-            />
+          <div style={{ width: "100%", height: 6, background: "var(--border)", borderRadius: 999, overflow: "hidden" }}>
+            <div style={{
+              width: `${Math.max(progress, 2)}%`,
+              height: "100%",
+              background: progress >= 80 ? "#f59e0b" : "#3b82f6",
+              transition: "width 120ms ease",
+            }} />
           </div>
         </div>
       )}
 
       {info && (
-        <div
-          style={{
-            color: "#0f5132",
-            background: "#d1e7dd",
-            border: "1px solid #badbcc",
-            padding: 10,
-            borderRadius: 6,
-            fontSize: 13,
-          }}
-        >
+        <div style={{
+          color: "#22c55e",
+          background: "#0a1f0e",
+          border: "1px solid #166534",
+          padding: "8px 10px",
+          borderRadius: 6,
+          fontSize: 12,
+        }}>
           {info}
         </div>
       )}
 
       {error && (
-        <div
-          style={{
-            color: "#842029",
-            background: "#f8d7da",
-            border: "1px solid #f5c2c7",
-            padding: 10,
-            borderRadius: 6,
-            fontSize: 13,
-            whiteSpace: "pre-wrap",
-          }}
-        >
+        <div style={{
+          color: "#f87171",
+          background: "#1f1315",
+          border: "1px solid #7f1d1d",
+          padding: "8px 10px",
+          borderRadius: 6,
+          fontSize: 12,
+          whiteSpace: "pre-wrap",
+        }}>
           {error}
         </div>
       )}
 
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={() => void handleUpload()} disabled={!canUpload}>
-          Upload
-        </button>
-        <button onClick={handleReset} disabled={uploading}>
-          Reset
-        </button>
+        <button onClick={() => void handleUpload()} disabled={!canUpload}>Upload</button>
+        <button onClick={handleReset} disabled={uploading}>Reset</button>
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import { FlyToInterpolator } from "@deck.gl/core";
 import Map, { Source, Layer, Marker } from "react-map-gl/maplibre";
 import { useAppStore } from "./store";
 
-const BASEMAP = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const MARTIN_BASE    = "http://localhost:3000";
 const POINTS_TILES   = `${MARTIN_BASE}/points/{z}/{x}/{y}`;
 const LINES_TILES    = `${MARTIN_BASE}/lines/{z}/{x}/{y}`;
@@ -39,10 +39,14 @@ function sanitizeProps(raw: Record<string, any>): Record<string, string> {
   delete cleaned.dataset_id;
   delete cleaned._sanitized;
   delete cleaned._pending;
-
+  // strip id only if it looks like a UUID (not a user-defined id field with meaningful data)
+  if (typeof cleaned.id === "string" && /^[0-9a-f-]{36}$/.test(cleaned.id)) {
+    delete cleaned.id;
+  }
   const entries = Object.entries(cleaned);
   if (entries.length === 0) return {};
 
+  // Detect char-indexed object (Martin mangling nested props)
   const isCharIndexed =
     entries.length > 2 && entries.every(([k]) => /^\d+$/.test(k));
 
@@ -59,6 +63,7 @@ function sanitizeProps(raw: Record<string, any>): Record<string, string> {
     } catch { return {}; }
   }
 
+  // Single "props" wrapper key
   if (entries.length === 1 && entries[0][0] === "props") {
     const inner = entries[0][1];
     if (typeof inner === "string") {
@@ -70,8 +75,12 @@ function sanitizeProps(raw: Record<string, any>): Record<string, string> {
     if (typeof inner === "object" && inner !== null) return sanitizeProps(inner);
   }
 
+  // Filter out any remaining numeric-only keys (stray char indexes)
+  const filtered = entries.filter(([k]) => !/^\d+$/.test(k));
+  if (filtered.length === 0) return {};
+
   return Object.fromEntries(
-    entries.map(([k, v]) => [k, v === null || v === undefined ? "" : String(v)])
+    filtered.map(([k, v]) => [k, v === null || v === undefined ? "" : String(v)])
   );
 }
 
@@ -118,7 +127,7 @@ function AttributeModal({
         if (!res.ok) throw new Error(await res.text());
       }
       onSaved({ ...feature, properties: { ...feature.properties, ...props, _sanitized: props } });
-      onClose();
+      // onClose();
     } catch (e: any) {
       setError(e.message ?? "Save failed");
     } finally {
@@ -138,19 +147,21 @@ function AttributeModal({
   return (
     <div
       style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
-        display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999,
+        position: "fixed", top: 0, right: 0, bottom: 0, width: 340,
+        background: "#111316",
+        borderLeft: "1px solid #232832",
+        boxShadow: "-4px 0 24px rgba(0,0,0,0.5)",
+        zIndex: 9999, display: "flex", flexDirection: "column",
+        animation: "slideInRight 0.2s ease",
       }}
-      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div style={{
-        background: "#111316", border: "1px solid #232832", borderRadius: 14,
-        padding: 24, width: 460, maxHeight: "85vh", overflow: "auto",
-        display: "grid", gap: 14, boxShadow: "0 24px 60px rgba(0,0,0,0.7)",
+        flex: 1, overflow: "auto",
+        padding: 20, display: "grid", gap: 14, alignContent: "start",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>{title}</div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#e7eaf0" }}>{title}</div>
             <div style={{ fontSize: 11, color: "#a5adbb", marginTop: 3, fontFamily: "monospace" }}>
               {feature.id.startsWith("pending-")
                 ? <span style={{ color: "#22c55e" }}>● New — staged for saving</span>
@@ -158,8 +169,10 @@ function AttributeModal({
             </div>
           </div>
           <button onClick={onClose} style={{
-            background: "none", border: "1px solid #232832", borderRadius: 6,
-            color: "#a5adbb", cursor: "pointer", padding: "4px 10px", fontSize: 14,
+            background: "#1e2230", border: "1px solid #232832",
+            borderRadius: 7, width: 28, height: 28, padding: 0,
+            cursor: "pointer", fontSize: 14, color: "#a5adbb",
+            display: "flex", alignItems: "center", justifyContent: "center",
           }}>✕</button>
         </div>
 
@@ -243,21 +256,27 @@ function AttributeModal({
             {error}
           </div>
         )}
+      </div>
 
-        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-          <button onClick={handleSave} disabled={saving} style={{
-            flex: 1, padding: "9px 0", background: "#3b82f6", border: "none",
-            borderRadius: 8, color: "#fff", fontWeight: 700,
-            cursor: saving ? "wait" : "pointer", fontSize: 13,
-          }}>
-            {saving ? "Saving…" : isNew ? "✓ Add feature" : "✓ Save changes"}
-          </button>
-          <button onClick={onClose} style={{
-            padding: "9px 16px", background: "none",
-            border: "1px solid #232832", borderRadius: 8,
-            color: "#a5adbb", cursor: "pointer", fontSize: 13,
-          }}>Cancel</button>
-        </div>
+      {/* Sticky footer */}
+      <div style={{
+        padding: "12px 20px",
+        borderTop: "1px solid #232832",
+        display: "flex", gap: 8,
+        background: "#111316",
+      }}>
+        <button onClick={handleSave} disabled={saving} style={{
+          flex: 1, padding: "9px 0", background: "#3b82f6", border: "none",
+          borderRadius: 8, color: "#fff", fontWeight: 700,
+          cursor: saving ? "wait" : "pointer", fontSize: 13,
+        }}>
+          {saving ? "Saving…" : isNew ? "✓ Add feature" : "✓ Save changes"}
+        </button>
+        <button onClick={onClose} style={{
+          padding: "9px 16px", background: "none",
+          border: "1px solid #3a4255", borderRadius: 8,
+          color: "#a5adbb", cursor: "pointer", fontSize: 13,
+        }}>Cancel</button>
       </div>
     </div>
   );
@@ -265,9 +284,10 @@ function AttributeModal({
 
 // ── PendingBar ────────────────────────────────────────────────────────────────
 
-function PendingBar({ pending, onSaveAll, onDiscard, saving }: {
+function PendingBar({ pending, onSaveToLayer, onSaveToDataset, onDiscard, saving }: {
   pending: PendingChange[];
-  onSaveAll: () => void;
+  onSaveToLayer: () => void;
+  onSaveToDataset: () => void;
   onDiscard: () => void;
   saving: boolean;
 }) {
@@ -285,21 +305,29 @@ function PendingBar({ pending, onSaveAll, onDiscard, saving }: {
       position: "absolute", bottom: 50, left: "50%", transform: "translateX(-50%)",
       zIndex: 850, background: "#111316", border: "1px solid #f59e0b",
       borderRadius: 12, padding: "10px 16px",
-      display: "flex", alignItems: "center", gap: 12,
+      display: "flex", alignItems: "center", gap: 10,
       boxShadow: "0 8px 32px rgba(0,0,0,0.6)", whiteSpace: "nowrap",
     }}>
       <span style={{ fontSize: 13, color: "#f59e0b", fontWeight: 600 }}>
         ● {parts.join(", ")} unsaved
       </span>
-      <button onClick={onSaveAll} disabled={saving} style={{
-        padding: "6px 16px", background: "#22c55e", border: "none",
+      <button onClick={onSaveToLayer} disabled={saving} style={{
+        padding: "6px 14px", background: "#1e3a5f",
+        border: "1px solid #2a5298",
+        borderRadius: 7, color: "#60a5fa", fontWeight: 600,
+        cursor: saving ? "not-allowed" : "pointer", fontSize: 12,
+      }}>
+        🗺 Save to layer
+      </button>
+      <button onClick={onSaveToDataset} disabled={saving} style={{
+        padding: "6px 14px", background: "#22c55e", border: "none",
         borderRadius: 7, color: "#fff", fontWeight: 700,
         cursor: saving ? "wait" : "pointer", fontSize: 12,
       }}>
-        {saving ? "Saving…" : "💾 Save all"}
+        {saving ? "Saving…" : "💾 Save to dataset"}
       </button>
       <button onClick={onDiscard} disabled={saving} style={{
-        padding: "6px 12px", background: "none", border: "1px solid #232832",
+        padding: "6px 10px", background: "none", border: "1px solid #3a4255",
         borderRadius: 7, color: "#a5adbb", cursor: "pointer", fontSize: 12,
       }}>Discard</button>
     </div>
@@ -314,7 +342,7 @@ function ConfirmBar({ label, onConfirm, onCancel }: {
   return (
     <div style={{
       position: "absolute", bottom: 100, left: "50%", transform: "translateX(-50%)",
-      zIndex: 800, background: "#111316", border: "1px solid #232832",
+      zIndex: 800, background: "#111316", border: "1px solid #3a4255",
       borderRadius: 12, padding: "10px 16px",
       display: "flex", alignItems: "center", gap: 12,
       boxShadow: "0 8px 32px rgba(0,0,0,0.5)", whiteSpace: "nowrap",
@@ -325,7 +353,7 @@ function ConfirmBar({ label, onConfirm, onCancel }: {
         borderRadius: 7, color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 12,
       }}>✓ Confirm</button>
       <button onClick={onCancel} style={{
-        padding: "6px 14px", background: "none", border: "1px solid #232832",
+        padding: "6px 14px", background: "none", border: "1px solid #3a4255",
         borderRadius: 7, color: "#a5adbb", cursor: "pointer", fontSize: 12,
       }}>Cancel</button>
     </div>
@@ -479,6 +507,59 @@ function FeaturePopup({
   );
 }
 
+// ── ExitDialog ────────────────────────────────────────────────────────────────
+
+function ExitDialog({ onSaveAndExit, onExitWithout, onCancel, saving }: {
+  onSaveAndExit: () => void;
+  onExitWithout: () => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000,
+    }}>
+      <div style={{
+        background: "#111316", border: "1px solid #232832", borderRadius: 14,
+        padding: 24, width: 340, display: "grid", gap: 16,
+        boxShadow: "0 24px 60px rgba(0,0,0,0.7)",
+      }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15, color: "#e7eaf0" }}>Unsaved changes</div>
+          <div style={{ fontSize: 13, color: "#a5adbb", marginTop: 6 }}>
+            You have unsaved edits. What would you like to do?
+          </div>
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <button onClick={onSaveAndExit} disabled={saving} style={{
+            padding: "10px 0", background: "#22c55e", border: "none",
+            borderRadius: 8, color: "#fff", fontWeight: 700,
+            cursor: saving ? "wait" : "pointer", fontSize: 13,
+          }}>
+            {saving ? "Saving…" : "💾 Save & exit"}
+          </button>
+          <button onClick={onExitWithout} disabled={saving} style={{
+            padding: "10px 0", background: "none",
+            border: "1px solid #f87171", borderRadius: 8,
+            color: "#f87171", fontWeight: 600,
+            cursor: saving ? "not-allowed" : "pointer", fontSize: 13,
+          }}>
+            Exit without saving
+          </button>
+          <button onClick={onCancel} disabled={saving} style={{
+            padding: "10px 0", background: "none",
+            border: "1px solid #3a4255", borderRadius: 8,
+            color: "#a5adbb", cursor: "pointer", fontSize: 13,
+          }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── MapView ───────────────────────────────────────────────────────────────────
 
 export function MapView() {
@@ -509,7 +590,6 @@ export function MapView() {
 
     const { longitude, latitude, zoom } = zoomTarget;
 
-    // Safety guard — reject invalid values before they crash MapLibre
     if (
       !Number.isFinite(latitude)  || !Number.isFinite(longitude) || !Number.isFinite(zoom) ||
       latitude < -90 || latitude > 90 ||
@@ -542,8 +622,8 @@ export function MapView() {
   const [savingAll, setSavingAll]             = useState(false);
   const [tileKey, setTileKey]                 = useState(0);
   const [serverSchema, setServerSchema]       = useState<string[]>([]);
+  const [showExitDialog, setShowExitDialog]   = useState(false);
 
-  // When activeDatasetId changes, reset edit state
   useEffect(() => {
     if (activeDatasetId === null) {
       setLocalEditMode("none");
@@ -555,7 +635,6 @@ export function MapView() {
     }
   }, [activeDatasetId]);
 
-  // Fetch schema for active dataset
   useEffect(() => {
     if (!activeDatasetId) { setServerSchema([]); return; }
 
@@ -574,7 +653,14 @@ export function MapView() {
         const seen = new Set<string>();
         const keys: string[] = [];
         for (const f of features.slice(0, 5)) {
-          const s = sanitizeProps(f.properties ?? {});
+          // f.properties from the API has props nested under the actual keys
+          // Use sanitizeProps which handles char-indexed unwrapping
+          const raw = f.properties ?? {};
+          // strip internal keys before schema detection
+          const cleaned: Record<string, any> = { ...raw };
+          delete cleaned._fid;
+          delete cleaned.dataset_id;
+          const s = sanitizeProps(cleaned);
           for (const k of Object.keys(s)) {
             if (!seen.has(k)) { seen.add(k); keys.push(k); }
           }
@@ -623,6 +709,7 @@ export function MapView() {
         properties: { _pending: true, _sanitized: {} },
       };
       setEditFeatures((fs) => [...fs, tmpFeat]);
+      stageChange({ kind: "add", feature: tmpFeat, table: "points" });
       setSelectedFeature(tmpFeat);
       setAttrModalIsNew(true);
       setShowAttrModal(true);
@@ -680,14 +767,36 @@ export function MapView() {
     }
 
     const tileProps = { ...(hit.properties ?? {}) };
+    const tempId = fid || `hit-${Date.now()}`;
+
+    // Set immediately with tile props so popup appears instantly
     setSelectedFeature({
-      id:         fid || `hit-${Date.now()}`,
+      id:         tempId,
       type:       "Feature",
       geometry:   null,
       properties: { ...tileProps, _sanitized: sanitizeProps(tileProps) },
     });
     setSelectionCount(count);
     setAttrModalIsNew(false);
+
+    // Then fetch full properties from API in the background
+    if (fid && activeDatasetId) {
+      fetch(`${API}/features/${activeTable}/${fid}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (!data) return;
+          const fullProps = data.properties ?? data;
+          const sanitized = sanitizeProps(fullProps);
+          setSelectedFeature((prev) => {
+            if (!prev || prev.id !== tempId) return prev;
+            return {
+              ...prev,
+              properties: { ...fullProps, _sanitized: sanitized },
+            };
+          });
+        })
+        .catch(() => { /* silently keep tile props */ });
+    }
   };
 
   // ── Load features ─────────────────────────────────────────────────────────
@@ -707,7 +816,15 @@ export function MapView() {
 
   // ── Exit edit ─────────────────────────────────────────────────────────────
   function handleExitEdit() {
-    if (pendingChanges.length > 0 && !window.confirm("You have unsaved changes. Exit anyway?")) return;
+    if (pendingChanges.length > 0) {
+      setShowExitDialog(true);
+      return;
+    }
+    doExit();
+  }
+
+  function doExit() {
+    setShowExitDialog(false);
     setLocalEditMode("none");
     setEditFeatures([]);
     setSelectedFeature(null);
@@ -715,6 +832,11 @@ export function MapView() {
     setPendingChanges([]);
     setActiveDatasetId(null);
     setTileKey((k) => k + 1);
+  }
+
+  async function handleSaveAndExit() {
+    await saveAllPending();
+    doExit();
   }
 
   // ── Stage change ─────────────────────────────────────────────────────────
@@ -744,6 +866,18 @@ export function MapView() {
   }
 
   // ── Save all ─────────────────────────────────────────────────────────────
+
+  // Extract the user-entered properties correctly:
+  // attributes are stored in _sanitized after the modal saves them
+  function propsForSave(feature: GeoFeature): Record<string, string> {
+    const sanitized = feature.properties._sanitized;
+    if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
+      return sanitized as Record<string, string>;
+    }
+    return sanitizeProps(feature.properties);
+  }
+
+  // "Save to dataset" — persists all pending changes to the DB, refreshes tiles
   async function saveAllPending() {
     if (pendingChanges.length === 0) return;
     setSavingAll(true);
@@ -751,37 +885,47 @@ export function MapView() {
     for (const change of pendingChanges) {
       try {
         if (change.kind === "add") {
-          await fetch(`${API}/datasets/${activeDatasetId}/features`, {
+          const res = await fetch(`${API}/datasets/${activeDatasetId}/features`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               geometry:   change.feature.geometry,
-              properties: sanitizeProps(change.feature.properties),
+              properties: propsForSave(change.feature),
               table:      change.table,
             }),
           });
+          if (!res.ok) throw new Error(await res.text());
         } else if (change.kind === "edit") {
-          await fetch(`${API}/features/${change.table}/${change.feature.id}`, {
+          const res = await fetch(`${API}/features/${change.table}/${change.feature.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               geometry:   change.feature.geometry,
-              properties: sanitizeProps(change.feature.properties),
+              properties: propsForSave(change.feature),
             }),
           });
+          if (!res.ok) throw new Error(await res.text());
         } else if (change.kind === "delete") {
-          await fetch(`${API}/features/${change.table}/${change.featureId}`, { method: "DELETE" });
+          const res = await fetch(`${API}/features/${change.table}/${change.featureId}`, { method: "DELETE" });
+          if (!res.ok) throw new Error(await res.text());
         }
       } catch (e) { console.error("Save failed:", change, e); failed++; }
     }
     setSavingAll(false);
     setPendingChanges([]);
     setTileKey((k) => k + 1);
+    // Reload features from DB so pending- ids are replaced with real DB ids
+    if (activeDatasetId) await loadFeatures(activeDatasetId, activeTable);
     if (failed > 0) alert(`${failed} change(s) failed to save.`);
   }
 
+  // "Save to layer" — only refreshes the tile layer visually, does NOT persist to DB
+  function saveToLayerOnly() {
+    // Pending features render as markers via editFeatures — just ensure select mode so they're visible
+    setLocalEditMode((m) => m === "none" ? "select" : m);
+  }
+
   function discardPending() {
-    if (!window.confirm("Discard all unsaved changes?")) return;
     setPendingChanges([]);
     if (activeDatasetId) loadFeatures(activeDatasetId, activeTable);
   }
@@ -808,10 +952,16 @@ export function MapView() {
   }
 
   function handleAttrSaved(updated: GeoFeature) {
-    setEditFeatures((fs) => fs.map((f) => f.id === updated.id ? updated : f));
+    console.log("SAVED - isNew:", attrModalIsNew, "geometry:", JSON.stringify(updated.geometry));
+    setEditFeatures((fs) => {
+    const next = fs.map((f) => f.id === updated.id ? updated : f);
+    console.log("editFeatures after save:", next.length, next.map(f => f.id));
+    return next;
+     });
     stageChange({ kind: attrModalIsNew ? "add" : "edit", feature: updated, table: activeTable });
     setSelectedFeature(updated);
     setShowAttrModal(false);
+    if (attrModalIsNew) setLocalEditMode("select");
   }
 
   function handleDelete(feature: GeoFeature) {
@@ -884,7 +1034,16 @@ export function MapView() {
         />
       )}
 
-      <PendingBar pending={pendingChanges} onSaveAll={saveAllPending} onDiscard={discardPending} saving={savingAll} />
+      <PendingBar pending={pendingChanges} onSaveToLayer={saveToLayerOnly} onSaveToDataset={saveAllPending} onDiscard={discardPending} saving={savingAll} />
+
+      {showExitDialog && (
+        <ExitDialog
+          onSaveAndExit={handleSaveAndExit}
+          onExitWithout={doExit}
+          onCancel={() => setShowExitDialog(false)}
+          saving={savingAll}
+        />
+      )}
 
       {showConfirmDraw && (
         <ConfirmBar
@@ -951,9 +1110,6 @@ export function MapView() {
         viewState={deckViewState}
         controller={{ dragPan: true, scrollZoom: true, doubleClickZoom: false, dragRotate: true }}
         onViewStateChange={({ viewState: vs, interactionState }: any) => {
-          // During a programmatic transition, DeckGL emits intermediate states.
-          // We must pass those back AS-IS (with transitionInterpolator intact)
-          // so the animation isn't cancelled. Strip transition props only for zustand.
           setDeckViewState(vs);
           const { transitionInterpolator: _ti, transitionDuration: _td, ...rest } = vs;
           setViewState(rest);
@@ -1015,7 +1171,10 @@ export function MapView() {
                   <Layer key={`${layer.id}-fill`} id={`${layer.id}-fill`}
                     type="fill" source="polygons-source" source-layer="polygons"
                     filter={dsFilter} minzoom={0} maxzoom={24}
-                    paint={{ "fill-color": color, "fill-opacity": layer.opacity * 0.5 }}
+                    paint={{
+                      "fill-color":   color,
+                      "fill-opacity": layer.opacity * 0.6,
+                    }}
                   />,
                   <Layer key={`${layer.id}-outline`} id={`${layer.id}-outline`}
                     type="line" source="polygons-source" source-layer="polygons"
@@ -1024,7 +1183,7 @@ export function MapView() {
                     paint={{
                       "line-color":   color,
                       "line-opacity": layer.opacity,
-                      "line-width":   ["interpolate", ["linear"], ["zoom"], 0,0.5, 6,1.5, 10,2, 14,3],
+                      "line-width":   1.5,
                     }}
                   />,
                 ];

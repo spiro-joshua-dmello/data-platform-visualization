@@ -42,7 +42,7 @@ tables:
     id_column: id
     minzoom: 0
     maxzoom: 24
-    buffer: 256
+    buffer: 1024
     extent: 4096
     clip_geom: false
     properties:

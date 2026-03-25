@@ -1,10 +1,11 @@
 :root {
   color-scheme: dark;
-  --panel: #111316;
-  --panel-2: #15181d;
-  --border: #232832;
-  --text: #e7eaf0;
-  --muted: #a5adbb;
+  --panel:    #111316;
+  --panel-2:  #15181d;
+  --border:   #232832;
+  --text:     #e7eaf0;
+  --muted:    #a5adbb;
+  --accent:   #3b82f6;
 }
 
 * { box-sizing: border-box; }
@@ -12,17 +13,43 @@
 html, body, #root {
   height: 100%;
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  font-family: -apple-system, ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial;
   color: var(--text);
   background: #0b0d10;
 }
 
-button, input, select {
-  font: inherit;
+button, input, select { font: inherit; }
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
+
+button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.12s;
+}
+button:hover { background: #1e2230; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+input, select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+input:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
 }
 
-hr {
-  border: 0;
-  border-top: 1px solid var(--border);
-  margin: 12px 0;
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
 }
