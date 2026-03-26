@@ -1,150 +1,50 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { MapView } from "./MapView";
-import { UploadPanel } from "./panels/UploadPanel";
-import { DatasetPanel } from "./panels/DatasetPanel";
-import { LayerPanel } from "./panels/LayerPanel";
-import { CatalogPanel } from "./panels/CatalogPanel";
-import { EditPanel } from "./panels/EditPanel";
+import { FeltUI } from "./FeltUI";
 import { useAppStore } from "./store";
 import { dbRowToStoreEntries } from "./panels/CatalogPanel";
 
 const API = "http://localhost:8787";
 
-type Tab = "layers" | "datasets" | "edit";
-
 export default function App() {
-  const { uploadOpen, setUploadOpen, activeDatasetId, addDataset, addLayer, layers, datasets, removedFromMapIds } = useAppStore();
-  const [tab, setTab] = useState<Tab>("layers");
+  useEffect(() => {
+    // Read store state directly via getState() to avoid stale closure —
+    // the hook variables (datasets, layers) are always [] at mount time.
+    fetch(`${API}/datasets`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (!data.ok) return;
 
-  // ── One-time startup sync: restore datasets from DB that aren't in store ──
-  // This handles page refresh. Runs once per session, not per tab switch.
-  // useEffect(() => {
-  //   fetch(`${API}/datasets`)
-  //     .then((r) => r.json())
-  //     .then((data) => {
-  //       if (!data.ok) return;
-  //       for (const row of data.datasets) {
-  //         const alreadyInStore = datasets.some((d: any) => d.id === row.id);
-  //         const userRemovedIt  = removedFromMapIds.has(row.id);
-  //         if (!alreadyInStore && !userRemovedIt) {
-  //           const { dataset, layer } = dbRowToStoreEntries(row);
-  //           addDataset(dataset);
-  //           if (!layers.some((l: any) => l.datasetId === row.id)) {
-  //             addLayer(layer);
-  //           }
-  //         }
-  //       }
-  //     })
-  //     .catch(() => {/* backend might not be running yet */});
-  // // eslint-disable-next-line react-hooks/exhaustive-deps
-  // }, []); // truly once on mount
+        // Get fresh store state at the moment the fetch resolves, not at mount
+        const { datasets, layers, addDataset, addLayer } = useAppStore.getState();
+
+        for (const row of data.datasets) {
+          // Skip if already in store from a previous upload this session
+          if (datasets.some((d) => d.id === row.id)) continue;
+
+          const { dataset, layer } = dbRowToStoreEntries(row);
+          addDataset(dataset);
+
+          if (!layers.some((l) => l.datasetId === row.id)) {
+            addLayer(layer);
+          }
+        }
+      })
+      .catch((err) => {
+        // Backend not running — silently ignore, user can upload later
+        console.warn("[startup sync] Could not reach backend:", err.message);
+      });
+  }, []); // run exactly once on mount
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "380px 1fr",
-        height: "100vh",
-        width: "100vw",
-        overflow: "hidden",
-      }}
-    >
-      {/* LEFT PANEL */}
-      <aside
-        style={{
-          borderRight: "1px solid var(--border)",
-          background: "var(--panel)",
-          padding: 12,
-          overflow: "auto",
-          display: "grid",
-          gridTemplateRows: "auto auto auto auto 1fr",
-          gap: 12,
-        }}
-      >
-        {/* Header */}
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 800 }}>Kepler-lite</div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-            Upload GeoJSON / CSV, generate vector tiles, style and edit layers.
-          </div>
-        </div>
-
-        {/* Upload button */}
-        <button onClick={() => setUploadOpen(!uploadOpen)}>
-          {uploadOpen ? "Hide upload" : "Upload dataset"}
-        </button>
-
-        {/* Upload panel */}
-        {uploadOpen && (
-          <>
-            <UploadPanel />
-            <hr style={{ margin: 0 }} />
-          </>
-        )}
-
-        {/* Tab bar */}
-        <div style={{
-          display: "flex",
-          borderBottom: "1px solid var(--border)",
-          gap: 0,
-        }}>
-          {(["layers", "datasets", "edit"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              style={{
-                flex: 1,
-                padding: "8px 4px",
-                fontSize: 12,
-                fontWeight: tab === t ? 700 : 400,
-                background: "none",
-                border: "none",
-                borderBottom: `2px solid ${tab === t ? "#3b82f6" : "transparent"}`,
-                color: tab === t ? "#e7eaf0" : "#a5adbb",
-                cursor: "pointer",
-                textTransform: "capitalize",
-                transition: "color 0.15s, border-color 0.15s",
-              }}
-            >
-              {t === "layers"   && "🗂 Layers"}
-              {t === "datasets" && "🗃 Datasets"}
-              {t === "edit"     && (
-                <span style={{ position: "relative" }}>
-                  ✏️ Edit
-                  {activeDatasetId && (
-                    <span style={{
-                      position: "absolute", top: -3, right: -6,
-                      width: 7, height: 7, borderRadius: "50%",
-                      background: "#22c55e",
-                      boxShadow: "0 0 4px #22c55e",
-                    }} />
-                  )}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab content */}
-        <div style={{ overflow: "auto", minHeight: 0 }}>
-          {tab === "layers" && (
-            <div style={{ display: "grid", gap: 12 }}>
-              <DatasetPanel />
-              <hr />
-              <LayerPanel />
-            </div>
-          )}
-
-          {tab === "datasets" && <CatalogPanel />}
-
-          {tab === "edit" && <EditPanel />}
-        </div>
-      </aside>
-
-      {/* MAP */}
-      <main style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
+      <main style={{ position: "absolute", inset: 0 }}>
         <MapView />
       </main>
+      <FeltUI />
     </div>
   );
 }

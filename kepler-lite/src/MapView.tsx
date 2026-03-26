@@ -3,6 +3,7 @@ import DeckGL from "@deck.gl/react";
 import { FlyToInterpolator } from "@deck.gl/core";
 import Map, { Source, Layer, Marker } from "react-map-gl/maplibre";
 import { useAppStore } from "./store";
+import { MapPinsLayer, MeasureOverlay, useMapToolHandler } from "./MapOverlay";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const MARTIN_BASE    = "http://localhost:3000";
@@ -568,7 +569,7 @@ export function MapView() {
     activeDatasetId, setActiveDatasetId,
     zoomTarget,
   } = useAppStore();
-
+  
   // Controlled view state — DeckGL reads this every render
   const [deckViewState, setDeckViewState] = useState<any>({
     longitude: viewState.longitude,
@@ -1019,7 +1020,9 @@ export function MapView() {
 
   const isDrawing       = localEditMode === "draw-line" || localEditMode === "draw-polygon";
   const showConfirmDraw = isDrawing && drawVertices.length >= 2;
-  const cursorStyle     = localEditMode === "add-point" || isDrawing ? "crosshair" : "default";
+  const { handleMapClick, measurePoints, cursorStyle: toolCursor } = useMapToolHandler();
+  const cursorStyle = toolCursor !== "default" ? toolCursor
+  : (localEditMode === "add-point" || isDrawing ? "crosshair" : "default");
 
   return (
     <>
@@ -1114,7 +1117,10 @@ export function MapView() {
           const { transitionInterpolator: _ti, transitionDuration: _td, ...rest } = vs;
           setViewState(rest);
         }}
-        onClick={handleDeckClick}
+        onClick={(info, event) => {
+          handleMapClick(info);        // ← add this
+          handleDeckClick(info, event); // ← existing
+        }}
       >
         <Map
           ref={mapRef}
@@ -1252,6 +1258,10 @@ export function MapView() {
                     ))
                 );
               })}
+            <MapPinsLayer />
+            {measurePoints.length > 0 && (
+              <MeasureOverlay points={measurePoints} onAddPoint={() => {}} mousePos={null} />
+            )}
         </Map>
       </DeckGL>
     </>

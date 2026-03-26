@@ -1,55 +1,33 @@
-:root {
-  color-scheme: dark;
-  --panel:    #111316;
-  --panel-2:  #15181d;
-  --border:   #232832;
-  --text:     #e7eaf0;
-  --muted:    #a5adbb;
-  --accent:   #3b82f6;
-}
-
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body, #root {
   height: 100%;
-  margin: 0;
-  font-family: -apple-system, ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial;
-  color: var(--text);
-  background: #0b0d10;
+  width: 100%;
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  background: #e5e7eb;
 }
 
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 
-hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
-
-button {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 7px;
-  padding: 7px 14px;
-  cursor: pointer;
-  font-size: 13px;
-  transition: background 0.12s;
+input[type="range"] { cursor: pointer; }
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none; width: 14px; height: 14px;
+  border-radius: 50%; background: #111827;
+  cursor: pointer; border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
-button:hover { background: #1e2230; }
-button:disabled { opacity: 0.4; cursor: not-allowed; }
-
-input, select {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 7px 10px;
-  color: var(--text);
-  font-size: 13px;
-  outline: none;
-}
-input:focus, select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+input[type="range"]::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #111827; cursor: pointer;
+  border: 2px solid white;
 }
 
-@keyframes slideInRight {
-  from { transform: translateX(100%); opacity: 0; }
-  to   { transform: translateX(0);    opacity: 1; }
-}
+input[type="color"] { cursor: pointer; }
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+input[type="color"]::-webkit-color-swatch { border: none; border-radius: 6px; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }

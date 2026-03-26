@@ -1,6 +1,27 @@
 import { create } from "zustand";
 import type { Dataset, LayerConfig, ViewState, Bounds } from "./types";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export type ActiveTool = "pointer" | "annotate" | "measure" | "pan";
+
+export type Annotation = {
+  id: string;
+  text: string;
+  color: string;
+  createdAt: number;
+};
+
+// Map pin — placed by clicking the map in annotate mode
+export type MapPin = {
+  id: string;
+  lng: number;
+  lat: number;
+  label: string;
+  color: string;
+  createdAt: number;
+};
+
 type ZoomTarget = {
   longitude: number;
   latitude: number;
@@ -12,6 +33,9 @@ type AppState = {
   datasets: Dataset[];
   layers: LayerConfig[];
   viewState: ViewState;
+  annotations: Annotation[];
+  mapPins: MapPin[];
+  activeTool: ActiveTool;
 
   zoomTarget: ZoomTarget | null;
   setZoomTarget: (target: { longitude: number; latitude: number; zoom: number }) => void;
@@ -32,6 +56,15 @@ type AppState = {
   removeLayer: (id: string) => void;
 
   setViewState: (patch: Partial<ViewState>) => void;
+  setActiveTool: (t: ActiveTool) => void;
+
+  addAnnotation: (a: Annotation) => void;
+  updateAnnotation: (id: string, patch: Partial<Annotation>) => void;
+  removeAnnotation: (id: string) => void;
+
+  addMapPin: (p: MapPin) => void;
+  updateMapPin: (id: string, patch: Partial<MapPin>) => void;
+  removeMapPin: (id: string) => void;
 };
 
 let _zoomTargetId = 0;
@@ -39,6 +72,9 @@ let _zoomTargetId = 0;
 export const useAppStore = create<AppState>((set) => ({
   datasets: [],
   layers: [],
+  annotations: [],
+  mapPins: [],
+  activeTool: "pointer",
 
   viewState: {
     longitude: 77.5946,
@@ -60,13 +96,14 @@ export const useAppStore = create<AppState>((set) => ({
       },
     }),
 
-  uploadOpen: true,
+  uploadOpen: false,
   setUploadOpen: (open) => set({ uploadOpen: open }),
 
   removedFromMapIds: new Set<string>(),
 
   activeDatasetId: null,
   setActiveDatasetId: (id) => set({ activeDatasetId: id }),
+  setActiveTool: (t) => set({ activeTool: t }),
 
   addDataset: (d) =>
     set((s) => ({
@@ -108,5 +145,31 @@ export const useAppStore = create<AppState>((set) => ({
   setViewState: (patch) =>
     set((s) => ({
       viewState: { ...s.viewState, ...patch },
+    })),
+
+  addAnnotation: (a) =>
+    set((s) => ({ annotations: [...s.annotations, a] })),
+
+  updateAnnotation: (id, patch) =>
+    set((s) => ({
+      annotations: s.annotations.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+    })),
+
+  removeAnnotation: (id) =>
+    set((s) => ({
+      annotations: s.annotations.filter((a) => a.id !== id),
+    })),
+
+  addMapPin: (p) =>
+    set((s) => ({ mapPins: [...s.mapPins, p] })),
+
+  updateMapPin: (id, patch) =>
+    set((s) => ({
+      mapPins: s.mapPins.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+    })),
+
+  removeMapPin: (id) =>
+    set((s) => ({
+      mapPins: s.mapPins.filter((p) => p.id !== id),
     })),
 }));
