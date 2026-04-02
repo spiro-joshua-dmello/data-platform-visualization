@@ -2,6 +2,8 @@ import React, { useState, useCallback } from "react";
 import { useAppStore, type Annotation, type ActiveTool } from "./store";
 import { UploadPanel } from "./panels/UploadPanel";
 
+const API = "http://localhost:8787";
+
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
   card:      "rgba(255,255,255,0.96)",
@@ -172,6 +174,16 @@ function MapToolbar() {
         </svg>
       ),
     },
+    {
+      id: "upload",
+      tip: "Upload file (U)",
+      label: "Upload",
+      icon: (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M8 2v9M5 5l3-3 3 3M2 13h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      ),
+    },
   ];
 
   // Keyboard shortcuts
@@ -182,60 +194,90 @@ function MapToolbar() {
       if (e.key === "h" || e.key === "H") setActiveTool("pan");
       if (e.key === "a" || e.key === "A") setActiveTool("annotate");
       if (e.key === "m" || e.key === "M") setActiveTool("measure");
+      if (e.key === "u" || e.key === "U") setActiveTool("upload");
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [setActiveTool]);
 
   return (
-    <Card style={{ display: "flex", alignItems: "center", gap: 2, padding: "5px 6px", borderRadius: 14 }}>
-      {tools.map((t, i) => {
-        const isActive = tool === t.id;
-        const [hov, setHov] = useState(false);
-        return (
-          <React.Fragment key={t.id}>
-            {i === 2 && (
-              <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
-            )}
-            <button
-              onClick={() => setActiveTool(t.id)}
-              onMouseEnter={() => setHov(true)}
-              onMouseLeave={() => setHov(false)}
-              title={t.tip}
-              style={{
-                display: "flex", alignItems: "center", gap: 5,
-                padding: "5px 10px", borderRadius: 10, border: "none", cursor: "pointer",
-                fontFamily: T.font, fontSize: 12, fontWeight: 600,
-                background: isActive ? T.text : hov ? T.hover : "transparent",
-                color: isActive ? "white" : T.textMuted,
-                transition: "background 0.12s, color 0.12s",
-              }}
-            >
-              {t.icon}
-              {t.label}
-            </button>
-          </React.Fragment>
-        );
-      })}
+    <div style={{ position: "relative" }}>
+      <Card style={{ display: "flex", alignItems: "center", gap: 2, padding: "5px 6px", borderRadius: 14 }}>
+        {tools.map((t, i) => {
+          const isActive = tool === t.id;
+          const [hov, setHov] = useState(false);
+          return (
+            <React.Fragment key={t.id}>
+              {(i === 2 || i === 4) && (
+                <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
+              )}
+              <button
+                onClick={() => setActiveTool(t.id)}
+                onMouseEnter={() => setHov(true)}
+                onMouseLeave={() => setHov(false)}
+                title={t.tip}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  padding: "5px 10px", borderRadius: 10, border: "none", cursor: "pointer",
+                  fontFamily: T.font, fontSize: 12, fontWeight: 600,
+                  background: isActive ? T.text : hov ? T.hover : "transparent",
+                  color: isActive ? "white" : T.textMuted,
+                  transition: "background 0.12s, color 0.12s",
+                }}
+              >
+                {t.icon}
+                {t.label}
+              </button>
+            </React.Fragment>
+          );
+        })}
 
-      {/* Measure hint */}
-      {tool === "measure" && (
-        <>
-          <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
-          <div style={{ fontSize: 11, color: T.textMuted, padding: "0 6px", whiteSpace: "nowrap" }}>
-            {(measurePoints?.length ?? 0) === 0 ? "Click to start measuring" : `${measurePoints.length} pts · ESC to clear`}
+        {/* Inline hints */}
+        {tool === "measure" && (
+          <>
+            <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
+            <div style={{ fontSize: 11, color: T.textMuted, padding: "0 6px", whiteSpace: "nowrap" }}>
+              {(measurePoints?.length ?? 0) === 0 ? "Click to start measuring" : `${measurePoints.length} pts · ESC to clear`}
+            </div>
+          </>
+        )}
+        {tool === "annotate" && (
+          <>
+            <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
+            <div style={{ fontSize: 11, color: T.orange, padding: "0 6px", fontWeight: 600, whiteSpace: "nowrap" }}>
+              Click map to place pin
+            </div>
+          </>
+        )}
+      </Card>
+
+      {/* Upload dropdown — appears below toolbar when upload tool is active */}
+      {tool === "upload" && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 10px)", left: "50%",
+          transform: "translateX(-50%)",
+          width: 300, zIndex: 200,
+          background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+          borderRadius: T.radius, border: `1px solid ${T.border}`,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.14)", overflow: "hidden",
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "10px 14px", borderBottom: `1px solid ${T.border}`,
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: T.font }}>Upload file</span>
+            <IconBtn onClick={() => setActiveTool("pointer")}>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+            </IconBtn>
           </div>
-        </>
-      )}
-      {tool === "annotate" && (
-        <>
-          <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
-          <div style={{ fontSize: 11, color: T.orange, padding: "0 6px", fontWeight: 600, whiteSpace: "nowrap" }}>
-            Click map to place pin
+          <div style={{ padding: 14 }}>
+            <UploadPanel />
           </div>
-        </>
+        </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -245,7 +287,7 @@ function LegendPanel({ onStyleLayer, onShowAttrTable, editMode }: {
   onShowAttrTable: (id: string) => void;
   editMode: boolean;
 }) {
-  const { layers, datasets, updateLayer, removeLayer, setZoomTarget } = useAppStore();
+  const { layers, datasets, updateLayer, removeLayer, removeDataset, setZoomTarget } = useAppStore();
   const [minimized, setMinimized] = useState(false);
   const [tab, setTab] = useState<"layers"|"notes">("layers");
 
@@ -281,9 +323,12 @@ function LegendPanel({ onStyleLayer, onShowAttrTable, editMode }: {
       {!minimized && (
         <div style={{ overflowY: "auto", flex: 1 }}>
           {tab === "layers"
-            ? <LayersTab layers={layers} datasets={datasets} updateLayer={updateLayer} removeLayer={removeLayer}
+            ? <LayersTab
+                layers={layers} datasets={datasets}
+                updateLayer={updateLayer} removeLayer={removeLayer} removeDataset={removeDataset}
                 onStyleLayer={onStyleLayer} onShowAttrTable={onShowAttrTable}
-                editMode={editMode} setZoomTarget={setZoomTarget} />
+                editMode={editMode} setZoomTarget={setZoomTarget}
+              />
             : <NotesTab />
           }
         </div>
@@ -293,8 +338,9 @@ function LegendPanel({ onStyleLayer, onShowAttrTable, editMode }: {
 }
 
 // ─── Layers Tab ───────────────────────────────────────────────────────────────
-function LayersTab({ layers, datasets, updateLayer, removeLayer, onStyleLayer, onShowAttrTable, editMode, setZoomTarget }: any) {
+function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, onStyleLayer, onShowAttrTable, editMode, setZoomTarget }: any) {
   const [hovId, setHovId] = useState<string|null>(null);
+  const [deleting, setDeleting] = useState<string|null>(null);
 
   if (layers.length === 0) return (
     <div style={{ padding: "32px 16px", textAlign: "center", color: T.textLight, fontSize: 13, fontFamily: T.font }}>
@@ -303,17 +349,38 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, onStyleLayer, o
     </div>
   );
 
+  async function handleDelete(layer: any) {
+    const datasetId = layer.datasetId;
+    setDeleting(layer.id);
+    try {
+      const res = await fetch(`${API}/datasets/${datasetId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      console.error("Delete failed:", e);
+    } finally {
+      removeLayer(layer.id);
+      removeDataset(datasetId);
+      setDeleting(null);
+    }
+  }
+
   return (
     <div style={{ padding: "6px 0" }}>
       {layers.map((layer: any) => {
         const ds = datasets.find((d: any) => d.id === layer.datasetId);
         const hex = rgbToHex(layer.color);
         const isHov = hovId === layer.id;
+        const isDeleting = deleting === layer.id;
         return (
           <div key={layer.id}
             onMouseEnter={() => setHovId(layer.id)}
             onMouseLeave={() => setHovId(null)}
-            style={{ padding: "8px 14px", background: isHov ? T.hover : "transparent", transition: "background 0.1s" }}>
+            style={{
+              padding: "8px 14px",
+              background: isHov ? T.hover : "transparent",
+              transition: "background 0.1s",
+              opacity: isDeleting ? 0.4 : 1,
+            }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button onClick={() => updateLayer(layer.id, { visible: !layer.visible })}
                 style={{ background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 0 }}
@@ -357,13 +424,16 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, onStyleLayer, o
                     <path d="M1.5 7h13M5.5 7v6" stroke="currentColor" strokeWidth="1.5"/>
                   </svg>
                 </IconBtn>
-                {editMode && (
-                  <IconBtn onClick={() => removeLayer(layer.id)} title="Remove layer" danger>
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                      <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                    </svg>
-                  </IconBtn>
-                )}
+                {/* Delete — always visible, calls backend */}
+                <IconBtn
+                  onClick={() => { if (!isDeleting) void handleDelete(layer); }}
+                  title="Delete layer"
+                  danger
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <path d="M2 4h12M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4M6 7v5M10 7v5M3 4l1 9.5A.5.5 0 0 0 4.5 14h7a.5.5 0 0 0 .5-.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </IconBtn>
               </div>
             </div>
             {ds && (
@@ -390,7 +460,6 @@ function NotesTab() {
 
   return (
     <div>
-      {/* Sub-tabs */}
       <div style={{ display: "flex", borderBottom: `1px solid ${T.border}`, padding: "0 14px" }}>
         {(["text","pins"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)} style={{
@@ -412,7 +481,6 @@ function NotesTab() {
 
       {tab === "text" && (
         <>
-          {/* Composer */}
           <div style={{ padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
             <textarea value={text} onChange={(e) => setText(e.target.value)}
               placeholder="Add a note…" rows={2}
@@ -446,7 +514,6 @@ function NotesTab() {
                 }}>Add</button>
             </div>
           </div>
-          {/* List */}
           {annotations.length === 0
             ? <div style={{ padding: "20px 16px", textAlign: "center", color: T.textLight, fontSize: 13, fontFamily: T.font }}>No notes yet</div>
             : annotations.map((a: Annotation) => (
@@ -550,7 +617,6 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
 
   return (
     <Card style={{ width: 288 }}>
-      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <LayerSwatch type={layer.type} color={hex} size={16}/>
@@ -571,7 +637,6 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
 
       {!minimized && (
         <>
-          {/* Tab bar */}
           <div style={{ display: "flex", borderBottom: `1px solid ${T.border}` }}>
             {(["style","symbology","filter"] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)} style={{
@@ -586,12 +651,10 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
 
           {tab === "style" && (
             <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* Visible */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Visible</span>
                 <Toggle checked={layer.visible} onChange={(v) => updateLayer(layer.id, { visible: v })}/>
               </div>
-              {/* Geometry type */}
               <div>
                 <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Geometry type</div>
                 <div style={{ display: "flex", gap: 4 }}>
@@ -605,7 +668,6 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
                   ))}
                 </div>
               </div>
-              {/* Colour */}
               <div>
                 <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Colour</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -625,7 +687,6 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
                   </div>
                 </div>
               </div>
-              {/* Opacity */}
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                   <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Opacity</span>
@@ -636,7 +697,6 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
                   style={{ width: "100%", accentColor: T.text }}
                 />
               </div>
-              {/* Preview */}
               <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Preview</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: "rgba(0,0,0,0.03)", borderRadius: T.radiusSm }}>
@@ -659,12 +719,11 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
 }
 
 // ─── Symbology Tab ────────────────────────────────────────────────────────────
-// Mock attribute columns — in production you'd fetch these from the feature schema
 const MOCK_COLUMNS = ["status", "category", "value", "type", "name"];
 const MOCK_VALUES: Record<string, string[]> = {
   status:   ["active", "inactive", "pending"],
   category: ["A", "B", "C", "D"],
-  value:    [],   // numeric — use continuous
+  value:    [],
   type:     ["primary", "secondary", "tertiary"],
   name:     [],
 };
@@ -675,14 +734,12 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
   const [discPalette, setDiscPalette] = useState("Tableau");
   const [contPalette, setContPalette] = useState("Blue");
   const isNumeric = (MOCK_VALUES[attrCol]?.length ?? 0) === 0;
-
   const discreteColors = DISCRETE_PALETTES[discPalette];
   const [contFrom, contTo] = CONTINUOUS_PALETTES[contPalette];
   const catValues = MOCK_VALUES[attrCol] ?? [];
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Mode selector */}
       <div>
         <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Colour by</div>
         <div style={{ display: "flex", gap: 4 }}>
@@ -696,105 +753,41 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
           ))}
         </div>
       </div>
-
       {mode !== "single" && (
         <div>
           <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Attribute column</div>
-          <select value={attrCol} onChange={(e) => setAttrCol(e.target.value)} style={{
-            width: "100%", padding: "6px 10px", borderRadius: 8,
-            border: `1.5px solid ${T.border}`, fontSize: 13, fontFamily: T.font,
-            background: "white", color: T.text, outline: "none", cursor: "pointer",
-          }}>
+          <select value={attrCol} onChange={(e) => setAttrCol(e.target.value)} style={{ width: "100%", padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${T.border}`, fontSize: 13, fontFamily: T.font, background: "white", color: T.text, outline: "none", cursor: "pointer" }}>
             {MOCK_COLUMNS.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
       )}
-
-      {mode === "single" && (
-        <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font, padding: "8px 0" }}>
-          Use the <strong>Style</strong> tab to set a single uniform colour for all features.
-        </div>
-      )}
-
+      {mode === "single" && <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font, padding: "8px 0" }}>Use the <strong>Style</strong> tab to set a single uniform colour.</div>}
       {mode === "discrete" && (
         <div>
           <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Palette</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {Object.entries(DISCRETE_PALETTES).map(([name, colors]) => (
-              <button key={name} onClick={() => setDiscPalette(name)} style={{
-                display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
-                borderRadius: 8, border: `2px solid ${discPalette === name ? T.accent : T.border}`,
-                background: discPalette === name ? T.accentBg ?? "rgba(37,99,235,0.06)" : "white",
-                cursor: "pointer",
-              }}>
+              <button key={name} onClick={() => setDiscPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${discPalette === name ? T.accent : T.border}`, background: discPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 50, textAlign: "left" }}>{name}</span>
                 <div style={{ display: "flex", gap: 2, flex: 1 }}>
-                  {colors.slice(0, 8).map((c, i) => (
-                    <div key={i} style={{ width: 14, height: 14, borderRadius: 3, background: c, flexShrink: 0 }}/>
-                  ))}
+                  {colors.slice(0, 8).map((c, i) => <div key={i} style={{ width: 14, height: 14, borderRadius: 3, background: c, flexShrink: 0 }}/>)}
                 </div>
               </button>
             ))}
           </div>
-
-          {catValues.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Legend preview</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {catValues.map((val, i) => (
-                  <div key={val} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 14, height: 14, borderRadius: 3, background: discreteColors[i % discreteColors.length], flexShrink: 0 }}/>
-                    <span style={{ fontSize: 12, color: T.text, fontFamily: T.font }}>{val}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {isNumeric && (
-            <div style={{ marginTop: 10, padding: "8px 10px", background: "rgba(245,158,11,0.08)", borderRadius: 8, fontSize: 12, color: "#b45309", fontFamily: T.font }}>
-              ⚠ <strong>{attrCol}</strong> appears to be numeric — consider <em>Continuous</em> mode instead.
-            </div>
-          )}
         </div>
       )}
-
       {mode === "continuous" && (
         <div>
           <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Colour ramp</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {Object.entries(CONTINUOUS_PALETTES).map(([name, [from, to]]) => (
-              <button key={name} onClick={() => setContPalette(name)} style={{
-                display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
-                borderRadius: 8, border: `2px solid ${contPalette === name ? T.accent : T.border}`,
-                background: contPalette === name ? "rgba(37,99,235,0.06)" : "white",
-                cursor: "pointer",
-              }}>
+              <button key={name} onClick={() => setContPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${contPalette === name ? T.accent : T.border}`, background: contPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 50, textAlign: "left" }}>{name}</span>
-                <div style={{
-                  flex: 1, height: 14, borderRadius: 4,
-                  background: `linear-gradient(to right, ${from}, ${to})`,
-                }}/>
+                <div style={{ flex: 1, height: 14, borderRadius: 4, background: `linear-gradient(to right, ${from}, ${to})` }}/>
               </button>
             ))}
           </div>
-
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Range preview</div>
-            <div style={{
-              height: 16, borderRadius: 6, width: "100%",
-              background: `linear-gradient(to right, ${contFrom}, ${contTo})`,
-              marginBottom: 4,
-            }}/>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.textMuted, fontFamily: T.font }}>
-              <span>Low</span><span>High</span>
-            </div>
-          </div>
-
-          {!isNumeric && (
-            <div style={{ marginTop: 10, padding: "8px 10px", background: "rgba(245,158,11,0.08)", borderRadius: 8, fontSize: 12, color: "#b45309", fontFamily: T.font }}>
-              ⚠ <strong>{attrCol}</strong> has categorical values — consider <em>Discrete</em> mode instead.
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -808,110 +801,41 @@ function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
   const [rules, setRules] = useState<FilterRule[]>([]);
   const OPS = ["=", "≠", ">", "<", "≥", "≤", "contains", "is empty"];
 
-  function addRule() {
-    setRules((r) => [...r, { col: MOCK_COLUMNS[0], op: "=", val: "" }]);
-  }
-  function updateRule(i: number, patch: Partial<FilterRule>) {
-    setRules((r) => r.map((rule, idx) => idx === i ? { ...rule, ...patch } : rule));
-  }
-  function removeRule(i: number) {
-    setRules((r) => r.filter((_, idx) => idx !== i));
-  }
-
+  function addRule() { setRules((r) => [...r, { col: MOCK_COLUMNS[0], op: "=", val: "" }]); }
+  function updateRule(i: number, patch: Partial<FilterRule>) { setRules((r) => r.map((rule, idx) => idx === i ? { ...rule, ...patch } : rule)); }
+  function removeRule(i: number) { setRules((r) => r.filter((_, idx) => idx !== i)); }
   const activeCount = rules.filter((r) => r.val.trim() || r.op === "is empty").length;
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: T.text, fontFamily: T.font }}>Filter features</div>
           <div style={{ fontSize: 11, color: T.textLight, fontFamily: T.font, marginTop: 2 }}>Show only features matching all rules</div>
         </div>
-        {activeCount > 0 && (
-          <span style={{ background: T.accent, color: "white", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 700, fontFamily: T.font }}>
-            {activeCount} active
-          </span>
-        )}
+        {activeCount > 0 && <span style={{ background: T.accent, color: "white", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 700, fontFamily: T.font }}>{activeCount} active</span>}
       </div>
-
-      {/* Rules */}
-      {rules.length === 0 ? (
-        <div style={{ padding: "16px 0", textAlign: "center", color: T.textLight, fontSize: 13, fontFamily: T.font }}>
-          No filters — all features shown
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {rules.length === 0
+        ? <div style={{ padding: "16px 0", textAlign: "center", color: T.textLight, fontSize: 13, fontFamily: T.font }}>No filters — all features shown</div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {rules.map((rule, i) => (
-            <div key={i} style={{
-              display: "grid", gridTemplateColumns: "1fr auto 1fr auto",
-              gap: 5, alignItems: "center",
-              padding: "8px 10px", background: "rgba(0,0,0,0.03)",
-              borderRadius: T.radiusSm, border: `1px solid ${T.border}`,
-            }}>
-              <select value={rule.col} onChange={(e) => updateRule(i, { col: e.target.value })} style={{
-                border: "none", background: "white", borderRadius: 6,
-                padding: "4px 6px", fontSize: 12, fontFamily: T.font,
-                color: T.text, outline: "none", cursor: "pointer",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-              }}>
-                {MOCK_COLUMNS.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-
-              <select value={rule.op} onChange={(e) => updateRule(i, { op: e.target.value })} style={{
-                border: "none", background: T.text, color: "white", borderRadius: 6,
-                padding: "4px 5px", fontSize: 12, fontFamily: T.font,
-                outline: "none", cursor: "pointer",
-              }}>
-                {OPS.map((op) => <option key={op} value={op}>{op}</option>)}
-              </select>
-
-              {rule.op !== "is empty" ? (
-                <input value={rule.val} onChange={(e) => updateRule(i, { val: e.target.value })}
-                  placeholder="value…"
-                  style={{
-                    border: "none", background: "white", borderRadius: 6,
-                    padding: "4px 8px", fontSize: 12, fontFamily: T.font,
-                    color: T.text, outline: "none",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-                  }}
-                />
-              ) : <div/>}
-
-              <IconBtn onClick={() => removeRule(i)} danger>
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-              </IconBtn>
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr auto", gap: 5, alignItems: "center", padding: "8px 10px", background: "rgba(0,0,0,0.03)", borderRadius: T.radiusSm, border: `1px solid ${T.border}` }}>
+              <select value={rule.col} onChange={(e) => updateRule(i, { col: e.target.value })} style={{ border: "none", background: "white", borderRadius: 6, padding: "4px 6px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>{MOCK_COLUMNS.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+              <select value={rule.op} onChange={(e) => updateRule(i, { op: e.target.value })} style={{ border: "none", background: T.text, color: "white", borderRadius: 6, padding: "4px 5px", fontSize: 12, fontFamily: T.font, outline: "none", cursor: "pointer" }}>{OPS.map((op) => <option key={op} value={op}>{op}</option>)}</select>
+              {rule.op !== "is empty" ? <input value={rule.val} onChange={(e) => updateRule(i, { val: e.target.value })} placeholder="value…" style={{ border: "none", background: "white", borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}/> : <div/>}
+              <IconBtn onClick={() => removeRule(i)} danger><svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></IconBtn>
             </div>
           ))}
         </div>
-      )}
-
-      {/* Add rule */}
-      <button onClick={addRule} style={{
-        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-        padding: "8px 0", borderRadius: 10, border: `1.5px dashed ${T.border}`,
-        background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600,
-        fontFamily: T.font, color: T.textMuted, transition: "border-color 0.15s, color 0.15s",
-      }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = T.accent; (e.currentTarget as HTMLButtonElement).style.color = T.accent; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = T.border; (e.currentTarget as HTMLButtonElement).style.color = T.textMuted; }}
-      >
+      }
+      <button onClick={addRule} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 0", borderRadius: 10, border: `1.5px dashed ${T.border}`, background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, color: T.textMuted }}>
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
         Add filter rule
       </button>
-
       {rules.length > 0 && (
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setRules([])} style={{
-            flex: 1, padding: "7px 0", borderRadius: 8, border: `1px solid ${T.border}`,
-            background: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
-            fontFamily: T.font, color: T.textMuted,
-          }}>Clear all</button>
-          <button onClick={() => {}} style={{
-            flex: 2, padding: "7px 0", borderRadius: 8, border: "none",
-            background: T.accent, cursor: "pointer", fontSize: 12, fontWeight: 600,
-            fontFamily: T.font, color: "white",
-          }}>Apply filters</button>
+          <button onClick={() => setRules([])} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: `1px solid ${T.border}`, background: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, color: T.textMuted }}>Clear all</button>
+          <button style={{ flex: 2, padding: "7px 0", borderRadius: 8, border: "none", background: T.accent, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, color: "white" }}>Apply filters</button>
         </div>
       )}
     </div>
@@ -935,29 +859,15 @@ function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => 
   if (!layer) return null;
 
   return (
-    <div style={{
-      background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-      borderTop: `1px solid ${T.border}`, boxShadow: "0 -4px 24px rgba(0,0,0,0.08)",
-      fontFamily: T.font, height: minimized ? 44 : 220,
-      transition: "height 0.25s ease", overflow: "hidden",
-      display: "flex", flexDirection: "column",
-    }}>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 20px", height: 44, borderBottom: `1px solid ${T.border}`, flexShrink: 0,
-      }}>
+    <div style={{ background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderTop: `1px solid ${T.border}`, boxShadow: "0 -4px 24px rgba(0,0,0,0.08)", fontFamily: T.font, height: minimized ? 44 : 220, transition: "height 0.25s ease", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", height: 44, borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{layer.name}</span>
-          <span style={{ fontSize: 11, color: T.textMuted, background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: 999, fontWeight: 500 }}>
-            {MOCK_ROWS.length} features
-          </span>
+          <span style={{ fontSize: 11, color: T.textMuted, background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: 999, fontWeight: 500 }}>{MOCK_ROWS.length} features</span>
         </div>
         <div style={{ display: "flex", gap: 2 }}>
           <IconBtn onClick={() => setMinimized(!minimized)} title={minimized ? "Expand" : "Minimise"}>
-            {minimized
-              ? <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 10l4-4 4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              : <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            }
+            {minimized ? <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 10l4-4 4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> : <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
           </IconBtn>
           <IconBtn onClick={onClose}><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></IconBtn>
         </div>
@@ -967,21 +877,15 @@ function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => 
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: "rgba(0,0,0,0.03)", position: "sticky", top: 0 }}>
-                {COLS.map((col) => (
-                  <th key={col} style={{ padding: "6px 16px", textAlign: "left", fontWeight: 600, color: T.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap", fontFamily: T.font }}>{col}</th>
-                ))}
+                {COLS.map((col) => <th key={col} style={{ padding: "6px 16px", textAlign: "left", fontWeight: 600, color: T.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap", fontFamily: T.font }}>{col}</th>)}
               </tr>
             </thead>
             <tbody>
               {MOCK_ROWS.map((row, i) => (
-                <tr key={row.id}
-                  style={{ background: i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent", cursor: "pointer" }}
+                <tr key={row.id} style={{ background: i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent", cursor: "pointer" }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(37,99,235,0.06)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent"; }}
-                >
-                  {COLS.map((col) => (
-                    <td key={col} style={{ padding: "7px 16px", color: T.text, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap", fontFamily: T.font }}>{(row as any)[col]}</td>
-                  ))}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent"; }}>
+                  {COLS.map((col) => <td key={col} style={{ padding: "7px 16px", color: T.text, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap", fontFamily: T.font }}>{(row as any)[col]}</td>)}
                 </tr>
               ))}
             </tbody>
@@ -1020,51 +924,24 @@ function ScaleBar({ zoom, latitude }: { zoom: number; latitude: number }) {
 }
 
 // ─── Edit Mode Panel ──────────────────────────────────────────────────────────
-// Replaces the simple toggle — shows a "Edit" button that opens a dropdown
-// listing editable (point) datasets. Selecting one fires setActiveDatasetId
-// which activates the MapView edit toolbar.
 function EditModePanel() {
   const { datasets, activeDatasetId, setActiveDatasetId } = useAppStore();
   const [open, setOpen] = useState(false);
   const [hov, setHov]   = useState(false);
-
   const isEditing = activeDatasetId !== null;
-  // Only point datasets can have features added/edited right now
   const editableDatasets = datasets.filter((d) => d.renderType === "point");
 
   function handleSelect(id: string) {
-    if (activeDatasetId === id) {
-      setActiveDatasetId(null); // deactivate
-    } else {
-      setActiveDatasetId(id);
-    }
+    setActiveDatasetId(activeDatasetId === id ? null : id);
     setOpen(false);
   }
 
-  function handleDone() {
-    setActiveDatasetId(null);
-    setOpen(false);
-  }
-
-  // Done button — shown when actively editing
   if (isEditing) {
     return (
-      <button
-        onClick={handleDone}
+      <button onClick={() => setActiveDatasetId(null)}
         onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-        style={{
-          display: "flex", alignItems: "center", gap: 7,
-          padding: "8px 18px", borderRadius: 12, border: "none",
-          cursor: "pointer", fontFamily: T.font, fontSize: 13, fontWeight: 600,
-          background: hov ? "#059669" : T.green,
-          color: "white",
-          boxShadow: "0 4px 16px rgba(16,185,129,0.35)",
-          backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-          transition: "background 0.15s",
-        }}>
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-          <path d="M2 8l4 4 8-8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
+        style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 18px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: T.font, fontSize: 13, fontWeight: 600, background: hov ? "#059669" : T.green, color: "white", boxShadow: "0 4px 16px rgba(16,185,129,0.35)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", transition: "background 0.15s" }}>
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 8l4 4 8-8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
         Done editing
       </button>
     );
@@ -1072,52 +949,23 @@ function EditModePanel() {
 
   return (
     <div style={{ position: "relative" }}>
-      {/* Edit button */}
-      <button
-        onClick={() => setOpen((o) => !o)}
+      <button onClick={() => setOpen((o) => !o)}
         onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-        style={{
-          display: "flex", alignItems: "center", gap: 7,
-          padding: "8px 16px", borderRadius: 12, border: `1px solid ${T.border}`,
-          cursor: "pointer", fontFamily: T.font, fontSize: 13, fontWeight: 600,
-          background: open ? T.text : hov ? "rgba(255,255,255,1)" : T.card,
-          color: open ? "white" : T.text,
-          boxShadow: T.shadow,
-          backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-          transition: "background 0.15s",
-        }}>
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-          <path d="M11 2l3 3-9 9H2v-3L11 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-        </svg>
+        style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 16px", borderRadius: 12, border: `1px solid ${T.border}`, cursor: "pointer", fontFamily: T.font, fontSize: 13, fontWeight: 600, background: open ? T.text : hov ? "rgba(255,255,255,1)" : T.card, color: open ? "white" : T.text, boxShadow: T.shadow, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", transition: "background 0.15s" }}>
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>
         Edit
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="none"
-          style={{ marginLeft: 2, transition: "transform 0.2s", transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
-          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ marginLeft: 2, transition: "transform 0.2s", transform: open ? "rotate(180deg)" : "rotate(0deg)" }}><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
-
-      {/* Dropdown */}
       {open && (
-        <div style={{
-          position: "absolute", top: "calc(100% + 8px)", right: 0,
-          width: 260, zIndex: 100,
-          background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-          borderRadius: T.radius, border: `1px solid ${T.border}`,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.14)",
-          fontFamily: T.font, overflow: "hidden",
-        }}>
-          {/* Header */}
+        <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 260, zIndex: 100, background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderRadius: T.radius, border: `1px solid ${T.border}`, boxShadow: "0 8px 32px rgba(0,0,0,0.14)", fontFamily: T.font, overflow: "hidden" }}>
           <div style={{ padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Edit a layer</div>
-            <div style={{ fontSize: 11, color: T.textLight, marginTop: 2 }}>
-              Select a point dataset to add, edit, or delete features
-            </div>
+            <div style={{ fontSize: 11, color: T.textLight, marginTop: 2 }}>Select a point dataset to add, edit, or delete features</div>
           </div>
-
           {editableDatasets.length === 0 ? (
             <div style={{ padding: "20px 14px", textAlign: "center", color: T.textLight, fontSize: 13 }}>
               <div style={{ fontSize: 20, marginBottom: 6 }}>✏️</div>
-              No point layers on map yet.<br/>Upload a point dataset first.
+              No point layers on map yet.
             </div>
           ) : (
             <div style={{ padding: "6px 0" }}>
@@ -1125,184 +973,20 @@ function EditModePanel() {
                 const isActive = activeDatasetId === ds.id;
                 return (
                   <button key={ds.id} onClick={() => handleSelect(ds.id)}
-                    style={{
-                      width: "100%", display: "flex", alignItems: "center", gap: 10,
-                      padding: "10px 14px", background: isActive ? "rgba(37,99,235,0.08)" : "transparent",
-                      border: "none", cursor: "pointer", textAlign: "left",
-                      transition: "background 0.1s",
-                    }}
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: isActive ? "rgba(37,99,235,0.08)" : "transparent", border: "none", cursor: "pointer", textAlign: "left", transition: "background 0.1s" }}
                     onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = T.hover; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = isActive ? "rgba(37,99,235,0.08)" : "transparent"; }}
-                  >
-                    {/* Point icon */}
-                    <div style={{
-                      width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: "rgba(37,99,235,0.1)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                        <circle cx="8" cy="8" r="5" fill="#3b82f6" stroke="white" strokeWidth="1.5"/>
-                      </svg>
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = isActive ? "rgba(37,99,235,0.08)" : "transparent"; }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: "rgba(37,99,235,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5" fill="#3b82f6" stroke="white" strokeWidth="1.5"/></svg>
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {ds.name}
-                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ds.name}</div>
                       <div style={{ fontSize: 11, color: T.textLight, marginTop: 1 }}>point layer</div>
                     </div>
-                    {isActive && (
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                        <path d="M2 8l4 4 8-8" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    )}
+                    {isActive && <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8l4 4 8-8" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                   </button>
                 );
               })}
-            </div>
-          )}
-
-          {/* Instructions footer */}
-          <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.border}`, background: "rgba(0,0,0,0.02)" }}>
-            <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.5 }}>
-              Once active: use the toolbar to <strong>Load</strong> features, then <strong>+ Point</strong> to add, click a point to select and edit attributes, or drag to move. <strong>Done editing</strong> to exit.
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Dataset Dropdown ─────────────────────────────────────────────────────────
-const KIND_COLOR: Record<string, string> = {
-  point: "#3b82f6", line: "#f59e0b", polygon: "#10b981", mixed: "#8b5cf6",
-};
-const KIND_ICON: Record<string, string> = {
-  point: "●", line: "━", polygon: "⬡", mixed: "◈",
-};
-
-function DatasetDropdown() {
-  const { datasets, removeDataset, removeLayer } = useAppStore();
-  const [open, setOpen]             = useState(false);
-  const [minimized, setMinimized]   = useState(false);
-  const [showUpload, setShowUpload] = useState(false);
-  const [hovBtn, setHovBtn]         = useState(false);
-  const [hovId, setHovId]           = useState<string|null>(null);
-  const count = datasets.length;
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        onClick={() => { setOpen((o) => !o); setMinimized(false); }}
-        onMouseEnter={() => setHovBtn(true)} onMouseLeave={() => setHovBtn(false)}
-        style={{
-          display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 12,
-          border: `1px solid ${T.border}`, cursor: "pointer",
-          fontFamily: T.font, fontSize: 13, fontWeight: 600,
-          background: open ? T.text : hovBtn ? "rgba(255,255,255,1)" : T.card,
-          color: open ? "white" : T.text,
-          boxShadow: T.shadow, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-          transition: "background 0.15s, color 0.15s",
-        }}>
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-          <path d="M8 1L15 5l-7 4L1 5l7-4z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-          <path d="M1 8l7 4 7-4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeOpacity="0.6"/>
-          <path d="M1 11.5l7 4 7-4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeOpacity="0.3"/>
-        </svg>
-        Datasets
-        {count > 0 && (
-          <span style={{
-            background: open ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.08)",
-            color: open ? "white" : T.textMuted,
-            borderRadius: 999, padding: "1px 7px", fontSize: 11, fontWeight: 700,
-          }}>{count}</span>
-        )}
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ marginLeft: 2, transition: "transform 0.2s", transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
-          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </button>
-
-      {open && (
-        <div style={{
-          position: "absolute", top: "calc(100% + 8px)", left: 0, width: 300, zIndex: 100,
-          background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-          borderRadius: T.radius, border: `1px solid ${T.border}`,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.14)", fontFamily: T.font, overflow: "hidden",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>
-              Datasets <span style={{ fontWeight: 400, color: T.textMuted }}>({count})</span>
-            </span>
-            <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-              <button
-                onClick={() => { setShowUpload((v) => !v); setMinimized(false); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 5, padding: "4px 10px",
-                  borderRadius: 8, border: "none", cursor: "pointer",
-                  fontSize: 11, fontWeight: 600, fontFamily: T.font,
-                  background: showUpload ? T.accent : "rgba(37,99,235,0.08)",
-                  color: showUpload ? "white" : T.accent, transition: "background 0.15s",
-                }}>
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                  <path d="M8 2v9M5 5l3-3 3 3M2 13h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                Upload
-              </button>
-              <IconBtn onClick={() => setMinimized((m) => !m)} title={minimized ? "Expand" : "Minimise"}>
-                {minimized
-                  ? <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  : <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 10l4-4 4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                }
-              </IconBtn>
-              <IconBtn onClick={() => setOpen(false)}>
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-              </IconBtn>
-            </div>
-          </div>
-
-          {showUpload && !minimized && (
-            <div style={{ borderBottom: `1px solid ${T.border}`, maxHeight: 360, overflowY: "auto" }}>
-              <div style={{ padding: 14 }}><UploadPanel /></div>
-            </div>
-          )}
-
-          {!minimized && (
-            <div style={{ maxHeight: 340, overflowY: "auto" }}>
-              {count === 0 ? (
-                <div style={{ padding: "28px 16px", textAlign: "center", color: T.textLight, fontSize: 13 }}>
-                  <div style={{ fontSize: 24, marginBottom: 8 }}>📂</div>
-                  No datasets uploaded yet
-                </div>
-              ) : (
-                <div style={{ padding: "6px 0" }}>
-                  {datasets.map((ds) => {
-                    const kind = ds.renderType ?? "mixed";
-                    const isHov = hovId === ds.id;
-                    return (
-                      <div key={ds.id}
-                        onMouseEnter={() => setHovId(ds.id)} onMouseLeave={() => setHovId(null)}
-                        style={{ padding: "10px 14px", background: isHov ? T.hover : "transparent", transition: "background 0.1s", display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{
-                          width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-                          background: `${KIND_COLOR[kind]}18`,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 13, color: KIND_COLOR[kind],
-                        }}>{KIND_ICON[kind]}</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 500, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={ds.name}>{ds.name}</div>
-                          <div style={{ fontSize: 11, color: T.textLight, marginTop: 2 }}>{kind} · {ds.type}</div>
-                        </div>
-                        <div style={{ opacity: isHov ? 1 : 0, transition: "opacity 0.15s" }}>
-                          <IconBtn onClick={() => { removeDataset(ds.id); removeLayer(`${ds.id}-layer`); }} title="Remove dataset" danger>
-                            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                              <path d="M2 4h12M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4M6 7v5M10 7v5M3 4l1 9.5A.5.5 0 0 0 4.5 14h7a.5.5 0 0 0 .5-.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          </IconBtn>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -1320,9 +1004,9 @@ export function FeltUI() {
   const handleStyle = useCallback((id: string) => setStyleLayerId((p) => p === id ? null : id), []);
   const handleAttr  = useCallback((id: string) => setAttrLayerId((p) => p === id ? null : id), []);
 
-  const isEditing    = activeDatasetId !== null;
-  const activeDs     = datasets.find((d) => d.id === activeDatasetId);
-  const attrH        = attrLayerId ? 220 : 0;
+  const isEditing = activeDatasetId !== null;
+  const activeDs  = datasets.find((d) => d.id === activeDatasetId);
+  const attrH     = attrLayerId ? 220 : 0;
 
   return (
     <>
@@ -1355,26 +1039,14 @@ export function FeltUI() {
         <MapToolbar />
       </div>
 
-      {/* Dataset dropdown — top left */}
-      <div style={{ position: "absolute", top: 16, left: 16, zIndex: 25 }}>
-        <DatasetDropdown />
-      </div>
-
       {/* Edit panel — top right */}
       <div style={{ position: "absolute", top: 16, right: 16, zIndex: 25 }}>
         <EditModePanel />
       </div>
 
-      {/* Active edit banner — below toolbar */}
+      {/* Active edit banner */}
       {isEditing && activeDs && (
-        <div style={{
-          position: "absolute", top: 60, left: "50%", transform: "translateX(-50%)",
-          zIndex: 20, background: T.green, color: "white",
-          padding: "7px 18px", borderRadius: 12, fontSize: 12, fontWeight: 600, fontFamily: T.font,
-          display: "flex", alignItems: "center", gap: 8,
-          boxShadow: "0 4px 16px rgba(16,185,129,0.35)",
-          whiteSpace: "nowrap",
-        }}>
+        <div style={{ position: "absolute", top: 60, left: "50%", transform: "translateX(-50%)", zIndex: 20, background: T.green, color: "white", padding: "7px 18px", borderRadius: 12, fontSize: 12, fontWeight: 600, fontFamily: T.font, display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 16px rgba(16,185,129,0.35)", whiteSpace: "nowrap" }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "white", flexShrink: 0, animation: "felt-pulse 1.5s infinite" }}/>
           Editing: <strong style={{ marginLeft: 2 }}>{activeDs.name}</strong>
           <span style={{ opacity: 0.75, fontWeight: 400, fontSize: 11 }}>· Load → add / click to select → edit attrs or delete</span>

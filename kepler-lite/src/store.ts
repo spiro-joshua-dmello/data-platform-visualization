@@ -3,7 +3,7 @@ import type { Dataset, LayerConfig, ViewState, Bounds } from "./types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type ActiveTool = "pointer" | "annotate" | "measure" | "pan";
+export type ActiveTool = "pointer" | "annotate" | "measure" | "pan" | "upload";
 
 export type Annotation = {
   id: string;
@@ -12,7 +12,6 @@ export type Annotation = {
   createdAt: number;
 };
 
-// Map pin — placed by clicking the map in annotate mode
 export type MapPin = {
   id: string;
   lng: number;

@@ -45,5 +45,6 @@ tables:
     buffer: 1024
     extent: 4096
     clip_geom: false
+    simplify_tolerance: 0
     properties:
       dataset_id: text
