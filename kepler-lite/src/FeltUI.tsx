@@ -123,9 +123,36 @@ function Card({ children, style = {} }: { children: React.ReactNode; style?: Rea
   );
 }
 
+function ToolButton({ t, isActive, onClick }: {
+  t: { id: string; label: string; icon: React.ReactNode; tip: string };
+  isActive: boolean;
+  onClick: () => void;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      title={t.tip}
+      style={{
+        display: "flex", alignItems: "center", gap: 5,
+        padding: "5px 10px", borderRadius: 10, border: "none", cursor: "pointer",
+        fontFamily: T.font, fontSize: 12, fontWeight: 600,
+        background: isActive ? T.text : hov ? T.hover : "transparent",
+        color: isActive ? "white" : T.textMuted,
+        transition: "background 0.12s, color 0.12s",
+      }}
+    >
+      {t.icon}
+      {t.label}
+    </button>
+  );
+}
+
 // ─── Top Toolbar ──────────────────────────────────────────────────────────────
 function MapToolbar() {
-  const { activeTool, setActiveTool, measurePoints } = useAppStore() as any;
+  const { activeTool, setActiveTool, measurePoints, measureMode, setMeasureMode, setMeasurePoints } = useAppStore() as any;
   const tool = activeTool as ActiveTool;
 
   const tools: { id: ActiveTool; label: string; icon: React.ReactNode; tip: string }[] = [
@@ -203,42 +230,48 @@ function MapToolbar() {
   return (
     <div style={{ position: "relative" }}>
       <Card style={{ display: "flex", alignItems: "center", gap: 2, padding: "5px 6px", borderRadius: 14 }}>
-        {tools.map((t, i) => {
-          const isActive = tool === t.id;
-          const [hov, setHov] = useState(false);
-          return (
-            <React.Fragment key={t.id}>
-              {(i === 2 || i === 4) && (
-                <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
-              )}
-              <button
-                onClick={() => setActiveTool(t.id)}
-                onMouseEnter={() => setHov(true)}
-                onMouseLeave={() => setHov(false)}
-                title={t.tip}
-                style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  padding: "5px 10px", borderRadius: 10, border: "none", cursor: "pointer",
-                  fontFamily: T.font, fontSize: 12, fontWeight: 600,
-                  background: isActive ? T.text : hov ? T.hover : "transparent",
-                  color: isActive ? "white" : T.textMuted,
-                  transition: "background 0.12s, color 0.12s",
-                }}
-              >
-                {t.icon}
-                {t.label}
-              </button>
-            </React.Fragment>
-          );
-        })}
+        {tools.map((t, i) => (
+          <React.Fragment key={t.id}>
+            {(i === 2 || i === 4) && (
+              <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
+            )}
+            <ToolButton t={t} isActive={tool === t.id} onClick={() => setActiveTool(t.id)} />
+          </React.Fragment>
+        ))}
 
         {/* Inline hints */}
         {tool === "measure" && (
           <>
-            <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
-            <div style={{ fontSize: 11, color: T.textMuted, padding: "0 6px", whiteSpace: "nowrap" }}>
-              {(measurePoints?.length ?? 0) === 0 ? "Click to start measuring" : `${measurePoints.length} pts · ESC to clear`}
-            </div>
+              <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
+
+              {/* Line / Polygon mode toggle */}
+              {(["line", "polygon"] as const).map((m) => {
+              const isActive = measureMode === m;
+              const accent   = m === "line" ? "#00e5ff" : "#69ff47";
+              return (
+                  <button
+                  key={m}
+                  onClick={() => { setMeasureMode(m); setMeasurePoints([]); }}
+                  style={{
+                      padding: "3px 9px", borderRadius: 7, border: "none", cursor: "pointer",
+                      fontSize: 11, fontWeight: 600, fontFamily: T.font,
+                      background: isActive ? `${accent}18` : "transparent",
+                      color:      isActive ? accent : T.textMuted,
+                      outline:    isActive ? `1.5px solid ${accent}55` : "none",
+                      transition: "all 0.12s",
+                  }}
+                  >
+                  {m === "line" ? "📏 Line" : "⬡ Area"}
+                  </button>
+              );
+              })}
+
+              <div style={{ width: 1, height: 20, background: T.border, margin: "0 3px" }}/>
+              <div style={{ fontSize: 11, color: T.textMuted, padding: "0 6px", whiteSpace: "nowrap" }}>
+              {(measurePoints?.length ?? 0) === 0
+                  ? "Click to start"
+                  : `${measurePoints.length} pts · ESC to clear`}
+              </div>
           </>
         )}
         {tool === "annotate" && (
@@ -545,14 +578,30 @@ function NotesTab() {
                       {new Date(a.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 1, opacity: hovId === a.id ? 1 : 0, transition: "opacity 0.15s" }}>
+                  <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
+                    {/* Edit — only on hover */}
+                    <div style={{ opacity: hovId === a.id ? 1 : 0, transition: "opacity 0.15s" }}>
+                      <IconBtn onClick={() => { setEditId(a.id); setEditText(a.text); }} title="Edit">
+                        <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                          <path d="M11 2l3 3-9 9H2v-3L11 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                        </svg>
+                      </IconBtn>
+                    </div>
+                    {/* Delete — ALWAYS visible */}
+                    <IconBtn onClick={() => removeAnnotation(a.id)} title="Delete" danger>
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                        <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      </svg>
+                    </IconBtn>
+                  </div>
+                  {/* <div style={{ display: "flex", gap: 1, opacity: hovId === a.id ? 1 : 0, transition: "opacity 0.15s" }}>
                     <IconBtn onClick={() => { setEditId(a.id); setEditText(a.text); }} title="Edit">
                       <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>
                     </IconBtn>
                     <IconBtn onClick={() => removeAnnotation(a.id)} title="Delete" danger>
                       <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                     </IconBtn>
-                  </div>
+                  </div> */}
                 </div>
               </div>
             ))

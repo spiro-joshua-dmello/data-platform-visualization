@@ -1,3 +1,22 @@
+// ─── store.ts — ADD THESE LINES ───────────────────────────────────────────────
+//
+// In the AppState type, add:
+//
+//   measureMode: "line" | "polygon";
+//   setMeasureMode: (m: "line" | "polygon") => void;
+//   measurePoints: [number, number][];
+//   setMeasurePoints: (pts: [number, number][]) => void;
+//
+// In the create() initializer, add:
+//
+//   measureMode: "line",
+//   setMeasureMode: (m) => set({ measureMode: m }),
+//   measurePoints: [],
+//   setMeasurePoints: (pts) => set({ measurePoints: pts }),
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Full updated store.ts below:
+
 import { create } from "zustand";
 import type { Dataset, LayerConfig, ViewState, Bounds } from "./types";
 
@@ -64,6 +83,12 @@ type AppState = {
   addMapPin: (p: MapPin) => void;
   updateMapPin: (id: string, patch: Partial<MapPin>) => void;
   removeMapPin: (id: string) => void;
+
+  // ── Measure tool state ────────────────────────────────────────────────────
+  measureMode: "line" | "polygon";
+  setMeasureMode: (m: "line" | "polygon") => void;
+  measurePoints: [number, number][];
+  setMeasurePoints: (pts: [number, number][]) => void;
 };
 
 let _zoomTargetId = 0;
@@ -89,9 +114,9 @@ export const useAppStore = create<AppState>((set) => ({
     set({
       zoomTarget: {
         longitude: target.longitude,
-        latitude:  target.latitude,
-        zoom:      target.zoom,
-        id:        ++_zoomTargetId,
+        latitude: target.latitude,
+        zoom: target.zoom,
+        id: ++_zoomTargetId,
       },
     }),
 
@@ -171,4 +196,10 @@ export const useAppStore = create<AppState>((set) => ({
     set((s) => ({
       mapPins: s.mapPins.filter((p) => p.id !== id),
     })),
+
+  // ── Measure ───────────────────────────────────────────────────────────────
+  measureMode: "line",
+  setMeasureMode: (m) => set({ measureMode: m }),
+  measurePoints: [],
+  setMeasurePoints: (pts) => set({ measurePoints: pts }),
 }));

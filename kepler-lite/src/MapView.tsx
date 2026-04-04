@@ -1020,10 +1020,9 @@ export function MapView() {
 
   const isDrawing       = localEditMode === "draw-line" || localEditMode === "draw-polygon";
   const showConfirmDraw = isDrawing && drawVertices.length >= 2;
-  const { handleMapClick, measurePoints, cursorStyle: toolCursor } = useMapToolHandler();
-  const cursorStyle = toolCursor !== "default" ? toolCursor
-  : (localEditMode === "add-point" || isDrawing ? "crosshair" : "default");
-
+  const { handleMapClick, mousePos, setMousePos, cursorStyle  } = useMapToolHandler();
+  const { measurePoints, measureMode } = useAppStore();
+  
   return (
     <>
       {activeDatasetId !== null && activeDataset !== null && (
@@ -1260,7 +1259,12 @@ export function MapView() {
               })}
             <MapPinsLayer />
             {measurePoints.length > 0 && (
-              <MeasureOverlay points={measurePoints} onAddPoint={() => {}} mousePos={null} />
+              <MeasureOverlay
+                points={measurePoints}
+                mode={measureMode}
+                onAddPoint={() => {}}
+                mousePos={null}
+              />
             )}
         </Map>
       </DeckGL>
