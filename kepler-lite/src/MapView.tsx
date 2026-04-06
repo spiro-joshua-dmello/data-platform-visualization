@@ -118,8 +118,22 @@ function AttributeModal({
     setSaving(true);
     setError("");
     try {
-      const isPending = feature.id.startsWith("pending-");
-      if (!isPending) {
+      if (isNew) {
+        // New feature: POST directly to backend, bypass pending bar entirely
+        const correctTable = (feature.properties._table as string) ?? table;
+        const geomType = feature.geometry?.type;
+        const safeTable =
+          (geomType === "Polygon"    || geomType === "MultiPolygon")    ? "polygons" :
+          (geomType === "LineString" || geomType === "MultiLineString") ? "lines"    :
+          (geomType === "Point"      || geomType === "MultiPoint")      ? "points"   :
+          correctTable;
+        const res = await fetch(`${API}/datasets/${(feature.properties as any)._datasetId ?? ""}/features`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ geometry: feature.geometry, properties: props, table: safeTable }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } else {
         const res = await fetch(`${API}/features/${table}/${feature.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -128,7 +142,6 @@ function AttributeModal({
         if (!res.ok) throw new Error(await res.text());
       }
       onSaved({ ...feature, properties: { ...feature.properties, ...props, _sanitized: props } });
-      // onClose();
     } catch (e: any) {
       setError(e.message ?? "Save failed");
     } finally {
@@ -271,7 +284,7 @@ function AttributeModal({
           borderRadius: 8, color: "#fff", fontWeight: 700,
           cursor: saving ? "wait" : "pointer", fontSize: 13,
         }}>
-          {saving ? "Saving…" : isNew ? "✓ Add feature" : "✓ Save changes"}
+          {saving ? "Saving…" : isNew ? "✓ Save to dataset" : "✓ Save changes"}
         </button>
         <button onClick={onClose} style={{
           padding: "9px 16px", background: "none",
@@ -406,10 +419,10 @@ function EditToolbar({
         <button onClick={() => setEditMode("add-point")} style={btn(editMode === "add-point")}>+ Point</button>
       )}
       {activeDataset.renderType === "line" && (
-        <button onClick={() => setEditMode("draw-line")} style={btn(editMode === "draw-line")}>✏ Line</button>
+        <button onClick={() => setEditMode("draw-line")} style={btn(editMode === "draw-line")}>＋ Line</button>
       )}
       {(activeDataset.renderType === "polygon" || activeDataset.renderType === "mixed") && (
-        <button onClick={() => setEditMode("draw-polygon")} style={btn(editMode === "draw-polygon")}>⬡ Polygon</button>
+        <button onClick={() => setEditMode("draw-polygon")} style={btn(editMode === "draw-polygon")}>＋ Polygon</button>
       )}
       <button onClick={onExitEdit} style={btn(false, true)}>⏹ Exit</button>
     </div>
@@ -625,6 +638,21 @@ export function MapView() {
   const [serverSchema, setServerSchema]       = useState<string[]>([]);
   const [showExitDialog, setShowExitDialog]   = useState(false);
 
+  // GeoJSON for polygon datasets — bypasses Martin tiling entirely
+  const [polygonGeoJSON, setPolygonGeoJSON]   = useState<Record<string, any>>({});
+  useEffect(() => {
+    const polygonDatasets = datasets.filter((d) => d.renderType === "polygon" || d.renderType === "mixed");
+    polygonDatasets.forEach(async (ds) => {
+      try {
+        const res = await fetch(`${API}/datasets/${ds.id}/features?table=polygons`);
+        const fc  = await res.json();
+        setPolygonGeoJSON((prev) => ({ ...prev, [ds.id]: fc }));
+      } catch (e) {
+        console.warn("Failed to fetch polygon GeoJSON for", ds.id, e);
+      }
+    });
+  }, [tileKey, datasets]);
+
   useEffect(() => {
     if (activeDatasetId === null) {
       setLocalEditMode("none");
@@ -770,11 +798,11 @@ export function MapView() {
     const tileProps = { ...(hit.properties ?? {}) };
     const tempId = fid || `hit-${Date.now()}`;
 
-    // Set immediately with tile props so popup appears instantly
+    // Set immediately with tile props + geometry from the tile hit
     setSelectedFeature({
       id:         tempId,
       type:       "Feature",
-      geometry:   null,
+      geometry:   hit.geometry ?? null,
       properties: { ...tileProps, _sanitized: sanitizeProps(tileProps) },
     });
     setSelectionCount(count);
@@ -886,13 +914,20 @@ export function MapView() {
     for (const change of pendingChanges) {
       try {
         if (change.kind === "add") {
+          // Derive table from geometry type as a safety net in case the staged table is wrong
+          const geomType = change.feature.geometry?.type;
+          const safeTable =
+            geomType === "Polygon"    || geomType === "MultiPolygon"    ? "polygons" :
+            geomType === "LineString" || geomType === "MultiLineString" ? "lines"    :
+            geomType === "Point"      || geomType === "MultiPoint"      ? "points"   :
+            change.table;
           const res = await fetch(`${API}/datasets/${activeDatasetId}/features`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               geometry:   change.feature.geometry,
               properties: propsForSave(change.feature),
-              table:      change.table,
+              table:      safeTable,
             }),
           });
           if (!res.ok) throw new Error(await res.text());
@@ -937,14 +972,13 @@ export function MapView() {
     const geometry = isLine
       ? { type: "LineString", coordinates: drawVertices }
       : { type: "Polygon",   coordinates: [[...drawVertices, drawVertices[0]]] };
-    const table  = isLine ? "lines" : "polygons";
-    const tmpId  = "pending-" + Date.now();
+    const table = isLine ? "lines" : "polygons";
+    const tmpId = "pending-" + Date.now();
     const newFeat: GeoFeature = {
       id: tmpId, type: "Feature", geometry,
-      properties: { _pending: true, _sanitized: {} },
+      properties: { _pending: true, _sanitized: {}, _table: table, _datasetId: activeDatasetId },
     };
     setEditFeatures((fs) => [...fs, newFeat]);
-    stageChange({ kind: "add", feature: newFeat, table });
     setDrawVertices([]);
     setLocalEditMode("select");
     setSelectedFeature(newFeat);
@@ -953,29 +987,63 @@ export function MapView() {
   }
 
   function handleAttrSaved(updated: GeoFeature) {
-    console.log("SAVED - isNew:", attrModalIsNew, "geometry:", JSON.stringify(updated.geometry));
-    setEditFeatures((fs) => {
-    const next = fs.map((f) => f.id === updated.id ? updated : f);
-    console.log("editFeatures after save:", next.length, next.map(f => f.id));
-    return next;
-     });
-    stageChange({ kind: attrModalIsNew ? "add" : "edit", feature: updated, table: activeTable });
-    setSelectedFeature(updated);
-    setShowAttrModal(false);
-    if (attrModalIsNew) setLocalEditMode("select");
+    if (attrModalIsNew) {
+      // Feature was already saved directly to DB inside AttributeModal.handleSave
+      // Just clean up: remove from editFeatures, refresh the GeoJSON source
+      setEditFeatures((fs) => fs.filter((f) => f.id !== updated.id));
+      setSelectedFeature(null);
+      setShowAttrModal(false);
+      setLocalEditMode("select");
+      setTileKey((k) => k + 1);
+    } else {
+      // Existing feature edit — stage the change as before
+      setEditFeatures((fs) => {
+        const existing = fs.find((f) => f.id === updated.id);
+        const merged = { ...updated, geometry: updated.geometry ?? existing?.geometry ?? null };
+        stageChange({ kind: "edit", feature: merged, table: activeTable });
+        return fs.map((f) => f.id === merged.id ? merged : f);
+      });
+      setSelectedFeature(updated);
+      setShowAttrModal(false);
+    }
   }
 
-  function handleDelete(feature: GeoFeature) {
+  async function handleDelete(feature: GeoFeature) {
     if (!window.confirm("Delete this feature?")) return;
+
+    // Remove from local edit features immediately
     setEditFeatures((fs) => fs.filter((f) => f.id !== feature.id));
+    setSelectedFeature(null);
+
     if (feature.id.startsWith("pending-")) {
+      // Never saved — just remove from pending changes
       setPendingChanges((p) =>
         p.filter((c) => !(("feature" in c) && (c as any).feature?.id === feature.id))
       );
-    } else {
-      stageChange({ kind: "delete", featureId: feature.id, table: activeTable });
+      return;
     }
-    setSelectedFeature(null);
+
+    // Derive the correct table from the feature's geometry type if available,
+    // otherwise fall back to activeTable
+    const geomType = feature.geometry?.type;
+    const table =
+      (geomType === "Polygon"    || geomType === "MultiPolygon")    ? "polygons" :
+      (geomType === "LineString" || geomType === "MultiLineString") ? "lines"    :
+      (geomType === "Point"      || geomType === "MultiPoint")      ? "points"   :
+      activeTable;
+
+    // Use _fid if available (tile properties sometimes expose it as _fid)
+    const fid = feature.properties?._fid ?? feature.id;
+
+    try {
+      const res = await fetch(`${API}/features/${table}/${fid}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await res.text());
+      // Refresh GeoJSON source
+      setTileKey((k) => k + 1);
+    } catch (e) {
+      console.error("Delete failed:", e);
+      alert("Failed to delete feature.");
+    }
   }
 
   function handlePointDragEnd(feature: GeoFeature, e: { lngLat: { lng: number; lat: number } }) {
@@ -1049,7 +1117,7 @@ export function MapView() {
 
       {showConfirmDraw && (
         <ConfirmBar
-          label={`Finish ${localEditMode === "draw-line" ? "line" : "polygon"} (${drawVertices.length} pts)?`}
+          label={`Save ${localEditMode === "draw-line" ? "line" : "polygon"} — ${drawVertices.length} points`}
           onConfirm={confirmDrawGeometry}
           onCancel={() => setDrawVertices([])}
         />
@@ -1134,9 +1202,14 @@ export function MapView() {
           <Source key={`lns-${tileKey}`} id="lines-source" type="vector"
             tiles={[`${LINES_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={24} promoteId="id"
           />
-          <Source key={`pgs-${tileKey}`} id="polygons-source" type="vector"
-            tiles={[`${POLYGONS_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={24} promoteId="id"
-          />
+          {vectorDatasets.map((ds) => (
+            <Source
+              key={`pgs-geojson-${ds.id}-${tileKey}`}
+              id={`polygons-geojson-${ds.id}`}
+              type="geojson"
+              data={polygonGeoJSON[ds.id] ?? { type: "FeatureCollection", features: [] }}
+            />
+          ))}
 
           {vectorDatasets.flatMap((dataset) =>
             layers
@@ -1174,15 +1247,16 @@ export function MapView() {
 
                 if (layer.type === "fill") return [
                   <Layer key={`${layer.id}-fill`} id={`${layer.id}-fill`}
-                    type="fill" source="polygons-source" source-layer="polygons"
+                    type="fill" source={`polygons-geojson-${dataset.id}`}
                     filter={dsFilter} minzoom={0} maxzoom={24}
                     paint={{
-                      "fill-color":   color,
-                      "fill-opacity": layer.opacity * 0.6,
+                      "fill-color":         color,
+                      "fill-opacity":       layer.opacity * 0.7,
+                      "fill-outline-color": color,
                     }}
                   />,
                   <Layer key={`${layer.id}-outline`} id={`${layer.id}-outline`}
-                    type="line" source="polygons-source" source-layer="polygons"
+                    type="line" source={`polygons-geojson-${dataset.id}`} source-layer="polygons"
                     filter={dsFilter} minzoom={0} maxzoom={24}
                     layout={{ "line-cap": "round", "line-join": "round" }}
                     paint={{
@@ -1195,6 +1269,57 @@ export function MapView() {
 
                 return [];
               })
+          )}
+
+          {/* ── Selection highlight ── */}
+          {selectedFeature && selectedFeature.geometry && (
+            <>
+              <Source
+                id="selection-highlight"
+                type="geojson"
+                data={{
+                  type: "FeatureCollection",
+                  features: [{ type: "Feature", geometry: selectedFeature.geometry, properties: {} }],
+                }}
+              />
+              {/* Fill flash for polygons */}
+              <Layer
+                id="selection-fill"
+                type="fill"
+                source="selection-highlight"
+                filter={["==", ["geometry-type"], "Polygon"]}
+                paint={{
+                  "fill-color":   "#f59e0b",
+                  "fill-opacity": 0.35,
+                }}
+              />
+              {/* Outline for polygons + lines */}
+              <Layer
+                id="selection-outline"
+                type="line"
+                source="selection-highlight"
+                layout={{ "line-cap": "round", "line-join": "round" }}
+                paint={{
+                  "line-color":   "#f59e0b",
+                  "line-width":   3,
+                  "line-opacity": 1,
+                }}
+              />
+              {/* Halo for points */}
+              <Layer
+                id="selection-point"
+                type="circle"
+                source="selection-highlight"
+                filter={["==", ["geometry-type"], "Point"]}
+                paint={{
+                  "circle-radius":       14,
+                  "circle-color":        "#f59e0b",
+                  "circle-opacity":      0.3,
+                  "circle-stroke-color": "#f59e0b",
+                  "circle-stroke-width": 2.5,
+                }}
+              />
+            </>
           )}
 
           {drawPreviewGeoJSON && (
@@ -1233,6 +1358,7 @@ export function MapView() {
               );
             })}
 
+          
           {localEditMode !== "none" &&
             editFeatures
               .filter((f) => f.geometry?.type === "LineString" || f.geometry?.type === "Polygon")
@@ -1256,6 +1382,55 @@ export function MapView() {
                       </Marker>
                     ))
                 );
+              })}
+
+          {/* Midpoint ghost handles — drag to insert a new vertex */}
+          {localEditMode === "select" &&
+            editFeatures
+              .filter((f) => f.geometry?.type === "LineString" || f.geometry?.type === "Polygon")
+              .flatMap((f) => {
+                const isLine = f.geometry.type === "LineString";
+                const rings: [number, number][][] = isLine ? [f.geometry.coordinates] : f.geometry.coordinates;
+                return rings.flatMap((ring: [number, number][], ri: number) => {
+                  const verts = ring.slice(0, isLine ? ring.length : ring.length - 1);
+                  return verts.map((coord: [number, number], vi: number) => {
+                    const nextVi = (vi + 1) % (isLine ? ring.length : verts.length);
+                    if (isLine && vi === verts.length - 1) return null; // no wrap for lines
+                    const next = ring[nextVi];
+                    const midLng = (coord[0] + next[0]) / 2;
+                    const midLat = (coord[1] + next[1]) / 2;
+                    return (
+                      <Marker
+                        key={`${f.id}-${ri}-mid-${vi}`}
+                        longitude={midLng}
+                        latitude={midLat}
+                        draggable
+                        onDragEnd={(e) => {
+                          // Insert a new vertex between vi and vi+1
+                          const table = isLine ? "lines" : "polygons";
+                          const newGeom = JSON.parse(JSON.stringify(f.geometry));
+                          const insertIdx = vi + 1;
+                          if (isLine) {
+                            newGeom.coordinates.splice(insertIdx, 0, [e.lngLat.lng, e.lngLat.lat]);
+                          } else {
+                            newGeom.coordinates[ri].splice(insertIdx, 0, [e.lngLat.lng, e.lngLat.lat]);
+                          }
+                          const updated = { ...f, geometry: newGeom };
+                          setEditFeatures((fs) => fs.map((feat) => feat.id === f.id ? updated : feat));
+                          stageChange({ kind: f.id.startsWith("pending-") ? "add" : "edit", feature: updated, table });
+                        }}
+                      >
+                        <div style={{
+                          width: 8, height: 8, borderRadius: "50%",
+                          background: "rgba(139,92,246,0.4)",
+                          border: "1.5px dashed #8b5cf6",
+                          cursor: "grab",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                        }} />
+                      </Marker>
+                    );
+                  }).filter(Boolean);
+                });
               })}
             <MapPinsLayer />
             {measurePoints.length > 0 && (

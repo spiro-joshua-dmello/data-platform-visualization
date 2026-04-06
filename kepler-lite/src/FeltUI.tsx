@@ -416,9 +416,19 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
             }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button onClick={() => updateLayer(layer.id, { visible: !layer.visible })}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 0 }}
-                title={layer.visible ? "Hide" : "Show"}>
-                <LayerSwatch type={layer.type} color={layer.visible ? hex : "#d1d5db"} size={18}/>
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 0, flexShrink: 0 }}
+                title={layer.visible ? "Hide layer" : "Show layer"}>
+                {layer.visible ? (
+                  <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                    <ellipse cx="8" cy="8" rx="6" ry="4" stroke={hex} strokeWidth="1.5"/>
+                    <circle cx="8" cy="8" r="2" fill={hex}/>
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                    <path d="M2 2l12 12" stroke="#d1d5db" strokeWidth="1.5" strokeLinecap="round"/>
+                    <ellipse cx="8" cy="8" rx="6" ry="4" stroke="#d1d5db" strokeWidth="1.5"/>
+                  </svg>
+                )}
               </button>
               <span style={{
                 fontSize: 13, fontWeight: 500, flex: 1, overflow: "hidden",
@@ -736,7 +746,7 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
                   </div>
                 </div>
               </div>
-              <div>
+              <div> 
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                   <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Opacity</span>
                   <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font }}>{Math.round(layer.opacity * 100)}%</span>
@@ -892,21 +902,51 @@ function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
 }
 
 // ─── Attribute Table ──────────────────────────────────────────────────────────
-const MOCK_ROWS = [
-  { id:"feat-001", name:"Feature A", type:"primary",   value:"42.5", status:"active"   },
-  { id:"feat-002", name:"Feature B", type:"secondary", value:"17.3", status:"inactive" },
-  { id:"feat-003", name:"Feature C", type:"primary",   value:"98.1", status:"active"   },
-  { id:"feat-004", name:"Feature D", type:"tertiary",  value:"5.0",  status:"pending"  },
-  { id:"feat-005", name:"Feature E", type:"secondary", value:"63.8", status:"active"   },
-];
-const COLS = Object.keys(MOCK_ROWS[0]);
+// ─── Attribute Table ──────────────────────────────────────────────────────────
+const API_BASE = "http://localhost:8787";
 
 function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => void }) {
-  const { layers } = useAppStore();
+  const { layers, datasets } = useAppStore();
   const [minimized, setMinimized] = useState(false);
-  const layer = layers.find((l) => l.id === layerId);
-  if (!layer) return null;
+  const [rows, setRows]           = useState<Record<string, string>[]>([]);
+  const [cols, setCols]           = useState<string[]>([]);
+  const [loading, setLoading]     = useState(true);
 
+  const layer   = layers.find((l) => l.id === layerId);
+  const dataset = datasets.find((d) => d.id === layer?.datasetId);
+
+  useEffect(() => {
+    if (!dataset) return;
+    const table =
+      dataset.renderType === "point" ? "points" :
+      dataset.renderType === "line"  ? "lines"  : "polygons";
+    setLoading(true);
+    fetch(`${API_BASE}/datasets/${dataset.id}/features?table=${table}`)
+      .then((r) => r.json())
+      .then((fc) => {
+        const features = fc.features ?? [];
+        // Collect all unique property keys (excluding internal ones)
+        const keySet = new Set<string>();
+        features.forEach((f: any) => {
+          Object.keys(f.properties ?? {}).forEach((k) => {
+            if (!["_fid", "dataset_id", "_sanitized", "_pending", "_table", "_datasetId"].includes(k)) {
+              keySet.add(k);
+            }
+          });
+        });
+        const allCols = Array.from(keySet);
+        setCols(allCols);
+        setRows(features.map((f: any) => {
+          const row: Record<string, string> = { __fid: f.id ?? f.properties?._fid ?? "" };
+          allCols.forEach((k) => { row[k] = String(f.properties?.[k] ?? ""); });
+          return row;
+        }));
+      })
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, [layerId, dataset?.id]);
+
+  if (!layer) return null;
   return (
     <div style={{ background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderTop: `1px solid ${T.border}`, boxShadow: "0 -4px 24px rgba(0,0,0,0.08)", fontFamily: T.font, height: minimized ? 44 : 220, transition: "height 0.25s ease", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", height: 44, borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
@@ -922,23 +962,41 @@ function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => 
         </div>
       </div>
       {!minimized && (
-        <div style={{ overflowY: "auto", flex: 1 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: "rgba(0,0,0,0.03)", position: "sticky", top: 0 }}>
-                {COLS.map((col) => <th key={col} style={{ padding: "6px 16px", textAlign: "left", fontWeight: 600, color: T.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap", fontFamily: T.font }}>{col}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {MOCK_ROWS.map((row, i) => (
-                <tr key={row.id} style={{ background: i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent", cursor: "pointer" }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(37,99,235,0.06)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent"; }}>
-                  {COLS.map((col) => <td key={col} style={{ padding: "7px 16px", color: T.text, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap", fontFamily: T.font }}>{(row as any)[col]}</td>)}
+        <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 220 }}>
+          {loading ? (
+            <div style={{ padding: "20px", textAlign: "center", color: T.textLight, fontSize: 12 }}>Loading…</div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding: "20px", textAlign: "center", color: T.textLight, fontSize: 12 }}>No features found</div>
+          ) : (
+            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12, fontFamily: T.font }}>
+              <thead>
+                <tr style={{ background: "rgba(0,0,0,0.03)", borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0 }}>
+                  <th style={{ padding: "6px 16px", textAlign: "left", color: T.textLight, fontWeight: 600, whiteSpace: "nowrap", background: T.card }}>fid</th>
+                  {cols.map((col) => (
+                    <th key={col} style={{ padding: "6px 16px", textAlign: "left", color: T.textLight, fontWeight: 600, whiteSpace: "nowrap", background: T.card }}>{col}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <tr key={i}
+                    style={{ background: i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent", cursor: "pointer" }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(37,99,235,0.06)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent"; }}
+                  >
+                    <td style={{ padding: "7px 16px", color: T.textLight, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 11 }}>
+                      {row.__fid?.slice(0, 8)}…
+                    </td>
+                    {cols.map((col) => (
+                      <td key={col} style={{ padding: "7px 16px", color: T.text, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap" }}>
+                        {row[col] || <span style={{ color: T.textLight, fontStyle: "italic" }}>empty</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </div>
@@ -978,7 +1036,7 @@ function EditModePanel() {
   const [open, setOpen] = useState(false);
   const [hov, setHov]   = useState(false);
   const isEditing = activeDatasetId !== null;
-  const editableDatasets = datasets.filter((d) => d.renderType === "point");
+  const editableDatasets = datasets.filter((d) => d.renderType && d.renderType !== "mixed");
 
   function handleSelect(id: string) {
     setActiveDatasetId(activeDatasetId === id ? null : id);
@@ -1009,12 +1067,12 @@ function EditModePanel() {
         <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 260, zIndex: 100, background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderRadius: T.radius, border: `1px solid ${T.border}`, boxShadow: "0 8px 32px rgba(0,0,0,0.14)", fontFamily: T.font, overflow: "hidden" }}>
           <div style={{ padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Edit a layer</div>
-            <div style={{ fontSize: 11, color: T.textLight, marginTop: 2 }}>Select a point dataset to add, edit, or delete features</div>
+            <div style={{ fontSize: 11, color: T.textLight, marginTop: 2 }}>Select a dataset to add, move, reshape, or delete features</div>
           </div>
           {editableDatasets.length === 0 ? (
             <div style={{ padding: "20px 14px", textAlign: "center", color: T.textLight, fontSize: 13 }}>
               <div style={{ fontSize: 20, marginBottom: 6 }}>✏️</div>
-              No point layers on map yet.
+              No editable layers on map yet.
             </div>
           ) : (
             <div style={{ padding: "6px 0" }}>
@@ -1025,12 +1083,14 @@ function EditModePanel() {
                     style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: isActive ? "rgba(37,99,235,0.08)" : "transparent", border: "none", cursor: "pointer", textAlign: "left", transition: "background 0.1s" }}
                     onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = T.hover; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = isActive ? "rgba(37,99,235,0.08)" : "transparent"; }}>
-                    <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: "rgba(37,99,235,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5" fill="#3b82f6" stroke="white" strokeWidth="1.5"/></svg>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: ds.renderType === "polygon" ? "rgba(16,185,129,0.1)" : ds.renderType === "line" ? "rgba(245,158,11,0.1)" : "rgba(59,130,246,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {ds.renderType === "polygon" && <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2L14 6v4L8 14 2 10V6z" fill="#10b981" stroke="white" strokeWidth="1.2"/></svg>}
+                      {ds.renderType === "line"    && <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 13L7 4l3 5 2-3 2 5" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      {ds.renderType === "point"   && <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5" fill="#3b82f6" stroke="white" strokeWidth="1.5"/></svg>}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 500, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ds.name}</div>
-                      <div style={{ fontSize: 11, color: T.textLight, marginTop: 1 }}>point layer</div>
+                      <div style={{ fontSize: 11, color: T.textLight, marginTop: 1 }}>{ds.renderType} layer</div>
                     </div>
                     {isActive && <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8l4 4 8-8" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                   </button>

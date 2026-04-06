@@ -1022,7 +1022,7 @@ app.post("/datasets/:datasetId/features", async (c) => {
 
   const [row] = await sql.unsafe(
     `INSERT INTO ${targetTable} (dataset_id, geom, props)
-     VALUES ($1::uuid, ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), to_json($3::text)::jsonb)
+     VALUES ($1::uuid, ST_Buffer(ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), 0), to_json($3::text)::jsonb)
      RETURNING id::text`,
     [datasetId, JSON.stringify(geometry), sql.json({ ...(properties ?? {}), dataset_id: datasetId })]
   );
@@ -1070,14 +1070,14 @@ app.patch("/features/:table/:featureId", async (c) => {
   if (geometry && properties) {
     await sql.unsafe(
       `UPDATE ${table}
-       SET geom  = ST_SetSRID(ST_GeomFromGeoJSON($1), 4326),
+       SET geom  = ST_Buffer(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326), 0),
            props = to_json($2::text)::jsonb
        WHERE id = $3::uuid`,
-      [JSON.stringify(properties), featureId]
+      [JSON.stringify(geometry), JSON.stringify(properties), featureId]
     );
   } else if (geometry) {
     await sql.unsafe(
-      `UPDATE ${table} SET geom = ST_SetSRID(ST_GeomFromGeoJSON($1), 4326) WHERE id = $2::uuid`,
+      `UPDATE ${table} SET geom = ST_Buffer(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326), 0) WHERE id = $2::uuid`,
       [JSON.stringify(geometry), featureId]
     );
   } else if (properties) {

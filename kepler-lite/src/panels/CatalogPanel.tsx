@@ -57,7 +57,7 @@ export function dbRowToStoreEntries(row: DBDataset): { dataset: Dataset; layer: 
     name:      row.name,
     type:      layerTypeFromKind(row.kind),
     visible:   true,
-    opacity:   1,
+    opacity:   0.8,
     color:     [0, 128, 255],
   };
 
@@ -161,7 +161,7 @@ export function CatalogPanel() {
         name:      row.name,
         type:      layerTypeFromKind(row.kind),
         visible:   true,
-        opacity:   1,
+        opacity:   0.8,
         color:     [0, 128, 255],
       };
 

@@ -42,9 +42,8 @@ tables:
     id_column: id
     minzoom: 0
     maxzoom: 24
-    buffer: 1024
+    buffer: 64
     extent: 4096
-    clip_geom: false
-    simplify_tolerance: 0
+    clip_geom: true
     properties:
       dataset_id: text
