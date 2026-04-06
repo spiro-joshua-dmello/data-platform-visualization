@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useAppStore, type Annotation, type ActiveTool } from "./store";
 import { UploadPanel } from "./panels/UploadPanel";
 
@@ -911,6 +911,7 @@ function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => 
   const [rows, setRows]           = useState<Record<string, string>[]>([]);
   const [cols, setCols]           = useState<string[]>([]);
   const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
 
   const layer   = layers.find((l) => l.id === layerId);
   const dataset = datasets.find((d) => d.id === layer?.datasetId);
@@ -942,17 +943,23 @@ function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => 
           return row;
         }));
       })
-      .catch(() => setRows([]))
+      .catch((e) => { setRows([]); setError("Failed to load: " + (e?.message ?? "unknown error")); })
       .finally(() => setLoading(false));
   }, [layerId, dataset?.id]);
 
   if (!layer) return null;
+    if (!dataset) return (
+      <div style={{ background: T.card, borderTop: `1px solid ${T.border}`, padding: "14px 20px", fontFamily: T.font, fontSize: 13, color: T.red, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span>⚠️ Dataset not found for this layer.</span>
+        <IconBtn onClick={onClose}><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></IconBtn>
+      </div>
+    );
   return (
     <div style={{ background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderTop: `1px solid ${T.border}`, boxShadow: "0 -4px 24px rgba(0,0,0,0.08)", fontFamily: T.font, height: minimized ? 44 : 220, transition: "height 0.25s ease", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", height: 44, borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{layer.name}</span>
-          <span style={{ fontSize: 11, color: T.textMuted, background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: 999, fontWeight: 500 }}>{MOCK_ROWS.length} features</span>
+          <span style={{ fontSize: 11, color: T.textMuted, background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: 999, fontWeight: 500 }}>{loading ? "…" : `${rows.length} features`}</span>
         </div>
         <div style={{ display: "flex", gap: 2 }}>
           <IconBtn onClick={() => setMinimized(!minimized)} title={minimized ? "Expand" : "Minimise"}>
@@ -965,6 +972,8 @@ function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => 
         <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 220 }}>
           {loading ? (
             <div style={{ padding: "20px", textAlign: "center", color: T.textLight, fontSize: 12 }}>Loading…</div>
+          ) : error ? (
+            <div style={{ padding: "20px", textAlign: "center", color: T.red, fontSize: 12 }}>{error}</div>
           ) : rows.length === 0 ? (
             <div style={{ padding: "20px", textAlign: "center", color: T.textLight, fontSize: 12 }}>No features found</div>
           ) : (
