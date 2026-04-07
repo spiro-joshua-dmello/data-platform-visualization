@@ -901,32 +901,37 @@ function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
   );
 }
 
-// ─── Attribute Table ──────────────────────────────────────────────────────────
+
 // ─── Attribute Table ──────────────────────────────────────────────────────────
 const API_BASE = "http://localhost:8787";
 
-function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => void }) {
+function AttributeTable({ layerId, onClose, editMode }: {
+  layerId: string;
+  onClose: () => void;
+  editMode: boolean;
+}) {
   const { layers, datasets } = useAppStore();
-  const [minimized, setMinimized] = useState(false);
-  const [rows, setRows]           = useState<Record<string, string>[]>([]);
-  const [cols, setCols]           = useState<string[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState<string | null>(null);
+  const [minimized, setMinimized]     = useState(false);
+  const [rows, setRows]               = useState<Record<string, string>[]>([]);
+  const [cols, setCols]               = useState<string[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState<string | null>(null);
+  const [editingCell, setEditingCell] = useState<{ fid: string; col: string } | null>(null);
+  const [editingVal, setEditingVal]   = useState("");
+  const [savingCell, setSavingCell]   = useState<{ fid: string; col: string } | null>(null);
 
   const layer   = layers.find((l) => l.id === layerId);
   const dataset = datasets.find((d) => d.id === layer?.datasetId);
+  const table   = dataset?.renderType === "point" ? "points" : dataset?.renderType === "line" ? "lines" : "polygons";
 
-  useEffect(() => {
+  const loadRows = useCallback(() => {
     if (!dataset) return;
-    const table =
-      dataset.renderType === "point" ? "points" :
-      dataset.renderType === "line"  ? "lines"  : "polygons";
     setLoading(true);
+    setError(null);
     fetch(`${API_BASE}/datasets/${dataset.id}/features?table=${table}`)
       .then((r) => r.json())
       .then((fc) => {
         const features = fc.features ?? [];
-        // Collect all unique property keys (excluding internal ones)
         const keySet = new Set<string>();
         features.forEach((f: any) => {
           Object.keys(f.properties ?? {}).forEach((k) => {
@@ -943,33 +948,84 @@ function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => 
           return row;
         }));
       })
-      .catch((e) => { setRows([]); setError("Failed to load: " + (e?.message ?? "unknown error")); })
+      .catch((e) => setError("Failed to load: " + (e?.message ?? "unknown")))
       .finally(() => setLoading(false));
-  }, [layerId, dataset?.id]);
+  }, [dataset?.id, table]);
+
+  useEffect(() => { loadRows(); }, [loadRows]);
+
+  async function commitEdit(fid: string, col: string, val: string) {
+    setSavingCell({ fid, col });
+    try {
+      // Get current props for this row so we do a full props merge
+      const row = rows.find((r) => r.__fid === fid);
+      if (!row) return;
+      const props: Record<string, string> = {};
+      cols.forEach((c) => { props[c] = c === col ? val : (row[c] ?? ""); });
+
+      const res = await fetch(`${API_BASE}/features/${table}/${fid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ properties: props }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Update local state immediately
+      setRows((prev) => prev.map((r) => r.__fid === fid ? { ...r, [col]: val } : r));
+    } catch (e: any) {
+      setError("Save failed: " + (e?.message ?? "unknown"));
+    } finally {
+      setSavingCell(null);
+      setEditingCell(null);
+    }
+  }
+
+  function startEdit(fid: string, col: string, currentVal: string) {
+    if (!editMode) return;
+    setEditingCell({ fid, col });
+    setEditingVal(currentVal);
+  }
 
   if (!layer) return null;
-    if (!dataset) return (
-      <div style={{ background: T.card, borderTop: `1px solid ${T.border}`, padding: "14px 20px", fontFamily: T.font, fontSize: 13, color: T.red, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span>⚠️ Dataset not found for this layer.</span>
-        <IconBtn onClick={onClose}><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></IconBtn>
-      </div>
-    );
+  if (!dataset) return (
+    <div style={{ background: T.card, borderTop: `1px solid ${T.border}`, padding: "14px 20px", fontFamily: T.font, fontSize: 13, color: T.red, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <span>⚠️ Dataset not found for this layer.</span>
+      <IconBtn onClick={onClose}><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></IconBtn>
+    </div>
+  );
+
   return (
-    <div style={{ background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderTop: `1px solid ${T.border}`, boxShadow: "0 -4px 24px rgba(0,0,0,0.08)", fontFamily: T.font, height: minimized ? 44 : 220, transition: "height 0.25s ease", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div style={{ background: T.card, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderTop: `1px solid ${T.border}`, boxShadow: "0 -4px 24px rgba(0,0,0,0.08)", fontFamily: T.font, height: minimized ? 44 : 260, transition: "height 0.25s ease", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", height: 44, borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{layer.name}</span>
-          <span style={{ fontSize: 11, color: T.textMuted, background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: 999, fontWeight: 500 }}>{loading ? "…" : `${rows.length} features`}</span>
+          <span style={{ fontSize: 11, color: T.textMuted, background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: 999, fontWeight: 500 }}>
+            {loading ? "…" : `${rows.length} features`}
+          </span>
+          {editMode && (
+            <span style={{ fontSize: 11, color: T.green, background: "rgba(16,185,129,0.1)", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>
+              ✏️ Editing — click any cell to edit
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", gap: 2 }}>
+          <IconBtn onClick={() => loadRows()} title="Refresh">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M13 8A5 5 0 1 1 8 3a5 5 0 0 1 3.5 1.5L13 6V2m0 4H9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </IconBtn>
           <IconBtn onClick={() => setMinimized(!minimized)} title={minimized ? "Expand" : "Minimise"}>
-            {minimized ? <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 10l4-4 4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> : <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            {minimized
+              ? <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 10l4-4 4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              : <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            }
           </IconBtn>
           <IconBtn onClick={onClose}><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></IconBtn>
         </div>
       </div>
+
+      {/* Body */}
       {!minimized && (
-        <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 220 }}>
+        <div style={{ overflowX: "auto", overflowY: "auto", flex: 1 }}>
           {loading ? (
             <div style={{ padding: "20px", textAlign: "center", color: T.textLight, fontSize: 12 }}>Loading…</div>
           ) : error ? (
@@ -979,28 +1035,61 @@ function AttributeTable({ layerId, onClose }: { layerId: string; onClose: () => 
           ) : (
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12, fontFamily: T.font }}>
               <thead>
-                <tr style={{ background: "rgba(0,0,0,0.03)", borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0 }}>
-                  <th style={{ padding: "6px 16px", textAlign: "left", color: T.textLight, fontWeight: 600, whiteSpace: "nowrap", background: T.card }}>fid</th>
+                <tr>
+                  <th style={{ padding: "6px 16px", textAlign: "left", color: T.textLight, fontWeight: 600, whiteSpace: "nowrap", background: T.card, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0 }}>fid</th>
                   {cols.map((col) => (
-                    <th key={col} style={{ padding: "6px 16px", textAlign: "left", color: T.textLight, fontWeight: 600, whiteSpace: "nowrap", background: T.card }}>{col}</th>
+                    <th key={col} style={{ padding: "6px 16px", textAlign: "left", color: T.textLight, fontWeight: 600, whiteSpace: "nowrap", background: T.card, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0 }}>{col}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, i) => (
-                  <tr key={i}
-                    style={{ background: i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent", cursor: "pointer" }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(37,99,235,0.06)"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent"; }}
+                  <tr key={row.__fid}
+                    style={{ background: i % 2 === 1 ? "rgba(0,0,0,0.015)" : "transparent" }}
                   >
-                    <td style={{ padding: "7px 16px", color: T.textLight, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 11 }}>
+                    <td style={{ padding: "6px 16px", color: T.textLight, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 11 }}>
                       {row.__fid?.slice(0, 8)}…
                     </td>
-                    {cols.map((col) => (
-                      <td key={col} style={{ padding: "7px 16px", color: T.text, borderBottom: `1px solid ${T.border}`, whiteSpace: "nowrap" }}>
-                        {row[col] || <span style={{ color: T.textLight, fontStyle: "italic" }}>empty</span>}
-                      </td>
-                    ))}
+                    {cols.map((col) => {
+                      const isEditingThis = editingCell?.fid === row.__fid && editingCell?.col === col;
+                      const isSaving = savingCell?.fid === row.__fid && savingCell?.col === col;
+                      return (
+                        <td key={col}
+                          onClick={() => !isEditingThis && startEdit(row.__fid, col, row[col] ?? "")}
+                          style={{
+                            padding: "0",
+                            borderBottom: `1px solid ${T.border}`,
+                            whiteSpace: "nowrap",
+                            cursor: editMode ? "text" : "default",
+                            background: isEditingThis ? "rgba(37,99,235,0.06)" : "transparent",
+                            minWidth: 100,
+                          }}
+                        >
+                          {isEditingThis ? (
+                            <input
+                              autoFocus
+                              value={editingVal}
+                              onChange={(e) => setEditingVal(e.target.value)}
+                              onBlur={() => commitEdit(row.__fid, col, editingVal)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") commitEdit(row.__fid, col, editingVal);
+                                if (e.key === "Escape") setEditingCell(null);
+                              }}
+                              style={{
+                                width: "100%", padding: "6px 16px", border: "none",
+                                outline: `2px solid ${T.accent}`, background: "white",
+                                fontSize: 12, fontFamily: T.font, color: T.text,
+                                boxSizing: "border-box",
+                              }}
+                            />
+                          ) : (
+                            <div style={{ padding: "6px 16px", color: isSaving ? T.textLight : T.text, minHeight: 30 }}>
+                              {isSaving ? "Saving…" : (row[col] || <span style={{ color: T.textLight, fontStyle: "italic" }}>empty</span>)}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -1130,7 +1219,7 @@ export function FeltUI() {
     <>
       {/* Attribute table — docked to bottom */}
       <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 30 }}>
-        {attrLayerId && <AttributeTable layerId={attrLayerId} onClose={() => setAttrLayerId(null)}/>}
+        {attrLayerId && <AttributeTable layerId={attrLayerId} onClose={() => setAttrLayerId(null)} editMode={isEditing}/>}
       </div>
 
       {/* Scale bar — bottom left */}

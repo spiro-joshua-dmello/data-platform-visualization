@@ -14,11 +14,9 @@ tables:
     id_column: id
     minzoom: 0
     maxzoom: 24
-    buffer: 64
+    buffer: 128
     extent: 4096
     clip_geom: false
-    properties:
-      dataset_id: text
 
   lines:
     schema: public
@@ -28,11 +26,9 @@ tables:
     id_column: id
     minzoom: 0
     maxzoom: 24
-    buffer: 64
+    buffer: 128
     extent: 4096
     clip_geom: false
-    properties:
-      dataset_id: text
 
   polygons:
     schema: public
@@ -42,8 +38,6 @@ tables:
     id_column: id
     minzoom: 0
     maxzoom: 24
-    buffer: 64
+    buffer: 128
     extent: 4096
     clip_geom: true
-    properties:
-      dataset_id: text

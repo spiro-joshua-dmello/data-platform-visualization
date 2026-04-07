@@ -412,7 +412,7 @@ async function streamCSVIntoDB(
 
       await tx.unsafe(
         `INSERT INTO points (dataset_id, geom, props)
-         VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), to_json($3::text)::jsonb)`,
+         VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4::jsonb)`,
         [datasetId, lng, lat, JSON.stringify({ ...r, dataset_id: datasetId })]
       );
       inserted++;
@@ -707,8 +707,8 @@ app.post("/datasets/upload", async (c) => {
 
         await tx.unsafe(
           `INSERT INTO points (dataset_id, geom, props)
-           VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), to_json($3::text)::jsonb)`,
-          [datasetId, lng, lat, sql.json(props)]
+           VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4::jsonb)`,
+          [datasetId, lng, lat, JSON.stringify(props)]
         );
 
         inserted++;
