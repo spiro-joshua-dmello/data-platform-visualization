@@ -4,7 +4,7 @@ import { FlyToInterpolator } from "@deck.gl/core";
 import Map, { Source, Layer, Marker } from "react-map-gl/maplibre";
 import { useAppStore } from "./store";
 import { MapPinsLayer, MeasureOverlay, useMapToolHandler } from "./MapOverlay";
-
+import type { FilterRule } from "./store";
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const MARTIN_BASE    = "http://localhost:3000";
 const POINTS_TILES   = `${MARTIN_BASE}/points/{z}/{x}/{y}`;
@@ -574,13 +574,35 @@ function ExitDialog({ onSaveAndExit, onExitWithout, onCancel, saving }: {
   );
 }
 
+
+function buildMapFilter(datasetId: string, rules: FilterRule[]): any {
+  // For vector tiles from Martin, dataset_id is a top-level promoted property
+  const dsFilter: any = ["==", ["get", "dataset_id"], datasetId];
+  if (!rules || rules.length === 0) return dsFilter;
+
+  const conditions: any[] = ["all", dsFilter];
+  for (const rule of rules) {
+    if (!rule.val && rule.op !== "is empty") continue;
+    const getter = ["get", rule.col];
+    if (rule.op === "=")             conditions.push(["==", getter, rule.val]);
+    else if (rule.op === "≠")        conditions.push(["!=", getter, rule.val]);
+    else if (rule.op === ">")        conditions.push([">",  getter, Number(rule.val)]);
+    else if (rule.op === "<")        conditions.push(["<",  getter, Number(rule.val)]);
+    else if (rule.op === "≥")        conditions.push([">=", getter, Number(rule.val)]);
+    else if (rule.op === "≤")        conditions.push(["<=", getter, Number(rule.val)]);
+    else if (rule.op === "contains") conditions.push(["in", rule.val, getter]);
+    else if (rule.op === "is empty") conditions.push(["!", ["has", rule.col]]);
+  }
+  return conditions.length === 2 ? dsFilter : conditions;
+}
+
 // ── MapView ───────────────────────────────────────────────────────────────────
 
 export function MapView() {
   const {
     datasets, layers, viewState, setViewState,
     activeDatasetId, setActiveDatasetId,
-    zoomTarget,
+    zoomTarget, filterRules,
   } = useAppStore();
   
   // Controlled view state — DeckGL reads this every render
@@ -596,6 +618,8 @@ export function MapView() {
   const mapRef = useRef<any>(null);
   const lastZoomTargetId = useRef<number>(-1);
 
+
+  
   // ── Zoom to layer via DeckGL FlyToInterpolator ───────────────────────────
   useEffect(() => {
     if (!zoomTarget) return;
@@ -637,6 +661,12 @@ export function MapView() {
   const [tileKey, setTileKey]                 = useState(0);
   const [serverSchema, setServerSchema]       = useState<string[]>([]);
   const [showExitDialog, setShowExitDialog]   = useState(false);
+  // ── Derived data — must be before useEffects ──────────────────────────────
+  const vectorDatasets = datasets.filter((d) => d.type === "vector-tile");
+  const activeDataset  = datasets.find((d) => d.id === activeDatasetId) ?? null;
+  const activeTable    =
+    activeDataset?.renderType === "point" ? "points" :
+    activeDataset?.renderType === "line"  ? "lines"  : "polygons";
 
   // GeoJSON for polygon datasets — bypasses Martin tiling entirely
   const [polygonGeoJSON, setPolygonGeoJSON]   = useState<Record<string, any>>({});
@@ -652,6 +682,44 @@ export function MapView() {
       }
     });
   }, [tileKey, datasets]);
+
+  // ── ADD THIS DIRECTLY BELOW ──────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.();
+    if (!map) return;
+
+    vectorDatasets
+      .filter((ds) => ds.renderType === "polygon" || ds.renderType === "mixed")
+      .forEach((ds) => {
+        const source = map.getSource(`polygons-geojson-${ds.id}`) as any;
+        if (!source?.setData) return;
+
+        const rawGeoJSON = polygonGeoJSON[ds.id] ?? { type: "FeatureCollection", features: [] };
+        const activeRules = filterRules[ds.id] ?? [];
+
+        const filteredGeoJSON = activeRules.length === 0 ? rawGeoJSON : {
+          ...rawGeoJSON,
+          features: (rawGeoJSON.features ?? []).filter((f: any) =>
+            activeRules.every((rule) => {
+              const props = f.properties ?? {};
+              const v = props[rule.col];
+              if (rule.op === "=")        return String(v ?? "") === rule.val;
+              if (rule.op === "≠")        return String(v ?? "") !== rule.val;
+              if (rule.op === ">")        return Number(v) > Number(rule.val);
+              if (rule.op === "<")        return Number(v) < Number(rule.val);
+              if (rule.op === "≥")        return Number(v) >= Number(rule.val);
+              if (rule.op === "≤")        return Number(v) <= Number(rule.val);
+              if (rule.op === "contains") return String(v ?? "").includes(rule.val);
+              if (rule.op === "is empty") return !v || v === "";
+              return true;
+            })
+          ),
+        };
+
+        source.setData(filteredGeoJSON);
+      });
+  }, [filterRules, polygonGeoJSON, vectorDatasets]);
+  // ─────────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (activeDatasetId === null) {
@@ -699,11 +767,6 @@ export function MapView() {
       .catch(() => setServerSchema([]));
   }, [activeDatasetId, datasets]);
 
-  const vectorDatasets = datasets.filter((d) => d.type === "vector-tile");
-  const activeDataset  = datasets.find((d) => d.id === activeDatasetId) ?? null;
-  const activeTable    =
-    activeDataset?.renderType === "point" ? "points" :
-    activeDataset?.renderType === "line"  ? "lines"  : "polygons";
 
   const localSchema: string[] = useMemo(() => {
     const seen = new Set<string>();
@@ -1202,26 +1265,55 @@ export function MapView() {
           <Source key={`lns-${tileKey}`} id="lines-source" type="vector"
             tiles={[`${LINES_TILES}?v=${tileKey}`]} minzoom={0} maxzoom={24} promoteId="id"
           />
-          {vectorDatasets.map((ds) => (
-            <Source
-              key={`pgs-geojson-${ds.id}-${tileKey}`}
-              id={`polygons-geojson-${ds.id}`}
-              type="geojson"
-              data={polygonGeoJSON[ds.id] ?? { type: "FeatureCollection", features: [] }}
-            />
-          ))}
+          {vectorDatasets.map((ds) => {
+            const rawGeoJSON = polygonGeoJSON[ds.id] ?? { type: "FeatureCollection", features: [] };
+            const activeRules = filterRules[ds.id] ?? [];
+            
+            const filteredGeoJSON = activeRules.length === 0 ? rawGeoJSON : {
+              ...rawGeoJSON,
+              features: (rawGeoJSON.features ?? []).filter((f: any) =>
+                activeRules.every((rule) => {
+                  const props = f.properties ?? {};
+                  const v = props[rule.col];
+                  if (rule.op === "=")        return String(v ?? "") === rule.val;
+                  if (rule.op === "≠")        return String(v ?? "") !== rule.val;
+                  if (rule.op === ">")        return Number(v) > Number(rule.val);
+                  if (rule.op === "<")        return Number(v) < Number(rule.val);
+                  if (rule.op === "≥")        return Number(v) >= Number(rule.val);
+                  if (rule.op === "≤")        return Number(v) <= Number(rule.val);
+                  if (rule.op === "contains") return String(v ?? "").includes(rule.val);
+                  if (rule.op === "is empty") return !v || v === "";
+                  return true;
+                })
+              ),
+            };
+
+            // Build a stable cache-bust key from the active rules
+            const rulesKey = activeRules.map(r => `${r.col}${r.op}${r.val}`).join("|");
+
+            return (
+              <Source
+                key={`pgs-geojson-${ds.id}-${tileKey}-${rulesKey}`}
+                id={`polygons-geojson-${ds.id}`}
+                type="geojson"
+                data={filteredGeoJSON}
+              />
+            );
+          })}
 
           {vectorDatasets.flatMap((dataset) =>
             layers
               .filter((l) => l.visible && l.datasetId === dataset.id)
               .flatMap((layer) => {
                 const color     = rgbToCss(layer.color);
-                const dsFilter: any = ["==", ["get", "dataset_id"], dataset.datasetId];
+                const activeRules = filterRules[dataset.id] ?? [];
+                const dsFilter = buildMapFilter(dataset.datasetId, activeRules);
 
                 if (layer.type === "circle") return [
                   <Layer key={layer.id} id={layer.id}
                     type="circle" source="points-source" source-layer="points"
-                    filter={dsFilter} minzoom={0} maxzoom={24}
+                    filter={dsFilter}  // ← keep this, needed for vector tiles
+                    minzoom={0} maxzoom={24}
                     paint={{
                       "circle-color":        color,
                       "circle-opacity":      layer.opacity,
@@ -1235,7 +1327,8 @@ export function MapView() {
                 if (layer.type === "line") return [
                   <Layer key={layer.id} id={layer.id}
                     type="line" source="lines-source" source-layer="lines"
-                    filter={dsFilter} minzoom={0} maxzoom={24}
+                    filter={dsFilter}  // ← keep this, needed for vector tiles
+                    minzoom={0} maxzoom={24}
                     layout={{ "line-cap": "round", "line-join": "round" }}
                     paint={{
                       "line-color":   color,
@@ -1245,10 +1338,12 @@ export function MapView() {
                   />,
                 ];
 
+                
                 if (layer.type === "fill") return [
                   <Layer key={`${layer.id}-fill`} id={`${layer.id}-fill`}
                     type="fill" source={`polygons-geojson-${dataset.id}`}
-                    filter={dsFilter} minzoom={0} maxzoom={24}
+                    minzoom={0} maxzoom={24}
+                    // ← NO filter prop — the GeoJSON source is already filtered
                     paint={{
                       "fill-color":         color,
                       "fill-opacity":       layer.opacity * 0.7,
@@ -1256,8 +1351,9 @@ export function MapView() {
                     }}
                   />,
                   <Layer key={`${layer.id}-outline`} id={`${layer.id}-outline`}
-                    type="line" source={`polygons-geojson-${dataset.id}`} source-layer="polygons"
-                    filter={dsFilter} minzoom={0} maxzoom={24}
+                    type="line" source={`polygons-geojson-${dataset.id}`}
+                    minzoom={0} maxzoom={24}
+                    // ← NO filter prop, NO source-layer
                     layout={{ "line-cap": "round", "line-join": "round" }}
                     paint={{
                       "line-color":   color,
@@ -1266,7 +1362,6 @@ export function MapView() {
                     }}
                   />,
                 ];
-
                 return [];
               })
           )}

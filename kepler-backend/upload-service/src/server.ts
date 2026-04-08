@@ -1011,6 +1011,156 @@ app.get("/datasets/:datasetId/features", async (c) => {
   return c.json({ type: "FeatureCollection", features });
 });
 
+
+// GET /datasets/:datasetId/columns
+app.get("/datasets/:datasetId/columns", async (c) => {
+  const { datasetId } = c.req.param();
+  const tables = ["points", "lines", "polygons"];
+
+  for (const tbl of tables) {
+    const countRows = await sql.unsafe(
+      `SELECT COUNT(*)::int AS cnt FROM ${tbl} WHERE dataset_id = $1::uuid`,
+      [datasetId]
+    ) as any[];
+    if (Number(countRows[0]?.cnt) === 0) continue;
+
+    // Handle both object and double-encoded string props
+    const keyRows = await sql.unsafe(
+      `SELECT DISTINCT k
+       FROM ${tbl},
+       LATERAL jsonb_object_keys(
+         CASE jsonb_typeof(props)
+           WHEN 'object' THEN props
+           WHEN 'string' THEN (props #>> '{}')::jsonb
+           ELSE NULL
+         END
+       ) AS k
+       WHERE dataset_id = $1::uuid`,
+      [datasetId]
+    ) as any[];
+
+    const columns = keyRows
+      .map((r: any) => String(r.k))
+      .filter((k: string) => !["dataset_id", "_fid"].includes(k));
+
+    return c.json({ ok: true, columns });
+  }
+
+  return c.json({ ok: true, columns: [] });
+});
+
+// GET /datasets/:datasetId/column-values/:column
+app.get("/datasets/:datasetId/column-values/:column", async (c) => {
+  const { datasetId, column } = c.req.param();
+  const tables = ["points", "lines", "polygons"];
+  let table = "points";
+
+  for (const tbl of tables) {
+    const rows = await sql.unsafe(
+      `SELECT COUNT(*)::int AS cnt FROM ${tbl} WHERE dataset_id = $1::uuid`,
+      [datasetId]
+    ) as any[];
+    if (Number(rows[0]?.cnt) > 0) { table = tbl; break; }
+  }
+
+  // Unwrap double-encoded props if needed
+  const totalRows = await sql.unsafe(
+    `SELECT COUNT(DISTINCT
+       CASE jsonb_typeof(props)
+         WHEN 'object' THEN props->>$2
+         WHEN 'string' THEN (props #>> '{}')::jsonb->>$2
+       END
+     )::int AS total
+     FROM ${table}
+     WHERE dataset_id = $1::uuid`,
+    [datasetId, column]
+  ) as any[];
+  const total = Number(totalRows[0]?.total ?? 0);
+  const limit = Math.min(total, 10);
+
+  if (limit === 0) return c.json({ ok: true, values: [], totalDistinct: 0 });
+
+  const valueRows = await sql.unsafe(
+    `SELECT
+       CASE jsonb_typeof(props)
+         WHEN 'object' THEN props->>$2
+         WHEN 'string' THEN (props #>> '{}')::jsonb->>$2
+       END AS val,
+       COUNT(*)::int AS cnt
+     FROM ${table}
+     WHERE dataset_id = $1::uuid
+     GROUP BY val
+     ORDER BY cnt DESC
+     LIMIT $3`,
+    [datasetId, column, limit]
+  ) as any[];
+
+  const values = valueRows
+    .filter((r: any) => r.val != null)
+    .map((r: any) => ({ value: String(r.val), count: Number(r.cnt) }));
+
+  return c.json({ ok: true, values, totalDistinct: total });
+});
+
+// POST /datasets/:datasetId/filter-count
+app.post("/datasets/:datasetId/filter-count", async (c) => {
+  const { datasetId } = c.req.param();
+  const { rules } = await c.req.json() as { rules: { col: string; op: string; val: string }[] };
+  const tables = ["points", "lines", "polygons"];
+  let table = "points";
+  let totalCount = 0;
+
+  for (const tbl of tables) {
+    const rows = await sql.unsafe(
+      `SELECT COUNT(*)::int AS cnt FROM ${tbl} WHERE dataset_id = $1::uuid`,
+      [datasetId]
+    ) as any[];
+    if (Number(rows[0]?.cnt) > 0) { table = tbl; totalCount = Number(rows[0].cnt); break; }
+  }
+
+  if (!rules || rules.length === 0) {
+    return c.json({ ok: true, count: totalCount, total: totalCount });
+  }
+
+  // Helper expression to unwrap props regardless of encoding
+  const propVal = (col: string, paramIdx: number) =>
+    `CASE jsonb_typeof(props) WHEN 'object' THEN props->>$${paramIdx} WHEN 'string' THEN (props #>> '{}')::jsonb->>$${paramIdx} END`;
+
+  const params: any[] = [datasetId];
+  const conditions: string[] = [`dataset_id = $1::uuid`];
+
+  for (const rule of rules) {
+    const colIdx = params.length + 1;
+    params.push(rule.col);
+    const pv = propVal(rule.col, colIdx);
+
+    if (rule.op === "is empty") {
+      conditions.push(`(${pv} IS NULL OR ${pv} = '')`);
+    } else if (rule.op === "contains") {
+      const valIdx = params.length + 1;
+      params.push(`%${rule.val}%`);
+      conditions.push(`${pv} ILIKE $${valIdx}`);
+    } else if ([">", "<", "≥", "≤"].includes(rule.op)) {
+      const valIdx = params.length + 1;
+      params.push(rule.val);
+      const pgOp = rule.op === "≥" ? ">=" : rule.op === "≤" ? "<=" : rule.op;
+      conditions.push(`(${pv})::numeric ${pgOp} ($${valIdx})::numeric`);
+    } else {
+      const valIdx = params.length + 1;
+      params.push(rule.val);
+      const pgOp = rule.op === "≠" ? "!=" : "=";
+      conditions.push(`${pv} ${pgOp} $${valIdx}`);
+    }
+  }
+
+  const rows = await sql.unsafe(
+    `SELECT COUNT(*)::int AS cnt FROM ${table} WHERE ${conditions.join(" AND ")}`,
+    params
+  ) as any[];
+
+  return c.json({ ok: true, count: Number(rows[0]?.cnt ?? 0), total: totalCount });
+});
+
 // POST /datasets/:datasetId/features — add a single feature
 app.post("/datasets/:datasetId/features", async (c) => {
   const { datasetId } = c.req.param();

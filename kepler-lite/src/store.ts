@@ -1,26 +1,5 @@
-// ─── store.ts — ADD THESE LINES ───────────────────────────────────────────────
-//
-// In the AppState type, add:
-//
-//   measureMode: "line" | "polygon";
-//   setMeasureMode: (m: "line" | "polygon") => void;
-//   measurePoints: [number, number][];
-//   setMeasurePoints: (pts: [number, number][]) => void;
-//
-// In the create() initializer, add:
-//
-//   measureMode: "line",
-//   setMeasureMode: (m) => set({ measureMode: m }),
-//   measurePoints: [],
-//   setMeasurePoints: (pts) => set({ measurePoints: pts }),
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// Full updated store.ts below:
-
 import { create } from "zustand";
 import type { Dataset, LayerConfig, ViewState, Bounds } from "./types";
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 export type ActiveTool = "pointer" | "annotate" | "measure" | "pan" | "upload";
 
@@ -46,6 +25,8 @@ type ZoomTarget = {
   zoom: number;
   id: number;
 };
+
+export type FilterRule = { col: string; op: string; val: string };
 
 type AppState = {
   datasets: Dataset[];
@@ -84,11 +65,15 @@ type AppState = {
   updateMapPin: (id: string, patch: Partial<MapPin>) => void;
   removeMapPin: (id: string) => void;
 
-  // ── Measure tool state ────────────────────────────────────────────────────
+  // ── Measure tool ──────────────────────────────────────────────────────────
   measureMode: "line" | "polygon";
   setMeasureMode: (m: "line" | "polygon") => void;
   measurePoints: [number, number][];
   setMeasurePoints: (pts: [number, number][]) => void;
+
+  // ── Filter rules ──────────────────────────────────────────────────────────
+  filterRules: Record<string, FilterRule[]>;
+  setFilterRules: (datasetId: string, rules: FilterRule[]) => void;
 };
 
 let _zoomTargetId = 0;
@@ -109,7 +94,6 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   zoomTarget: null,
-
   setZoomTarget: (target) =>
     set({
       zoomTarget: {
@@ -202,4 +186,9 @@ export const useAppStore = create<AppState>((set) => ({
   setMeasureMode: (m) => set({ measureMode: m }),
   measurePoints: [],
   setMeasurePoints: (pts) => set({ measurePoints: pts }),
+
+  // ── Filter rules ─────────────────────────────────────────────────────────
+  filterRules: {},
+  setFilterRules: (datasetId, rules) =>
+    set((s) => ({ filterRules: { ...s.filterRules, [datasetId]: rules } })),
 }));

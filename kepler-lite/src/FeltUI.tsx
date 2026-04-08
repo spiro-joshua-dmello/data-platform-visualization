@@ -853,20 +853,135 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
   );
 }
 
+
 // ─── Filter Tab ───────────────────────────────────────────────────────────────
 type FilterRule = { col: string; op: string; val: string };
+const OPS = ["=", "≠", ">", "<", "≥", "≤", "contains", "is empty"];
+const FILTER_API = "http://localhost:8787";
 
 function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
-  const [rules, setRules] = useState<FilterRule[]>([]);
-  const OPS = ["=", "≠", ">", "<", "≥", "≤", "contains", "is empty"];
+  const { datasets, setFilterRules } = useAppStore();
+  const dataset = datasets.find((d) => d.id === layer.datasetId);
+  console.log("[filter] dataset:", dataset, "layer:", layer);
+  const [rules, setRules]             = useState<FilterRule[]>([]);
+  const [columns, setColumns]         = useState<string[]>([]);
+  const [colsLoading, setColsLoading] = useState(false);
+  const [ruleValues, setRuleValues]   = useState<Record<number, { value: string; count: number }[]>>({});
+  const [ruleValLoading, setRuleValLoading] = useState<Record<number, boolean>>({});
+  const [filteredCount, setFilteredCount]   = useState<number | null>(null);
+  const [totalCount, setTotalCount]         = useState<number | null>(null);
+  const [applying, setApplying]             = useState(false);
 
-  function addRule() { setRules((r) => [...r, { col: MOCK_COLUMNS[0], op: "=", val: "" }]); }
-  function updateRule(i: number, patch: Partial<FilterRule>) { setRules((r) => r.map((rule, idx) => idx === i ? { ...rule, ...patch } : rule)); }
-  function removeRule(i: number) { setRules((r) => r.filter((_, idx) => idx !== i)); }
+  // Load column names once
+  useEffect(() => {
+    if (!dataset?.id) return;
+    setColsLoading(true);
+    console.log("[filter] fetching columns for dataset", dataset.id);
+    fetch(`${FILTER_API}/datasets/${dataset.id}/columns`)
+      .then((r) => r.json())
+      .then((data) => {
+        console.log("[filter] columns response:", data);
+        if (data.ok) setColumns(data.columns ?? []);
+      })
+      .catch((err) => {
+        console.error("[filter] columns fetch failed:", err);
+      })
+      .finally(() => setColsLoading(false));
+  }, [dataset?.id]);
+
+  async function loadValuesForRule(index: number, col: string, dsId: string) {
+    if (!dsId || !col) return;
+    setRuleValLoading((prev) => ({ ...prev, [index]: true }));
+    try {
+      const res  = await fetch(`${FILTER_API}/datasets/${dsId}/column-values/${encodeURIComponent(col)}`);
+      const data = await res.json();
+      if (data.ok) setRuleValues((prev) => ({ ...prev, [index]: data.values ?? [] }));
+    } catch {}
+    setRuleValLoading((prev) => ({ ...prev, [index]: false }));
+  }
+  
+  async function applyFilters() {
+    if (!dataset?.id) return;
+    setApplying(true);
+    setFilteredCount(null);
+    // Push to store so MapView reacts immediately
+    setFilterRules(dataset.id, rules);
+    try {
+      const res = await fetch(`${FILTER_API}/datasets/${dataset.id}/filter-count`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rules }),
+      });
+      const data = await res.json();
+      if (data.ok) { setFilteredCount(data.count); setTotalCount(data.total); }
+    } catch {}
+    setApplying(false);
+  }
+
+  function clearAll() {
+    setRules([]); setRuleValues({});
+    setFilteredCount(null); setTotalCount(null);
+    if (dataset?.id) setFilterRules(dataset.id, []); // clear map filter too
+  }
+
+
+
+  function addRule() {
+    if (!dataset?.id || columns.length === 0) return;
+    const firstCol = columns[0];
+    const newIndex = rules.length;
+    setRules((r) => [...r, { col: firstCol, op: "=", val: "" }]);
+    loadValuesForRule(newIndex, firstCol, dataset.id);
+  }
+
+  function updateRule(i: number, patch: Partial<FilterRule>) {
+    setRules((r) => r.map((rule, idx) => idx === i ? { ...rule, ...patch } : rule));
+    if (patch.col && dataset?.id) {
+      setRuleValues((prev) => { const n = { ...prev }; delete n[i]; return n; });
+      loadValuesForRule(i, patch.col, dataset.id);
+    }
+    setFilteredCount(null);
+  }
+
+  function removeRule(i: number) {
+    setRules((r) => r.filter((_, idx) => idx !== i));
+    setRuleValues((prev) => {
+      const n: typeof prev = {};
+      Object.entries(prev).forEach(([k, v]) => {
+        const ki = Number(k);
+        if (ki < i) n[ki] = v;
+        else if (ki > i) n[ki - 1] = v;
+      });
+      return n;
+    });
+    setFilteredCount(null);
+  }
+
+  function clearAll() {
+    setRules([]); setRuleValues({});
+    setFilteredCount(null); setTotalCount(null);
+  }
+
+  async function applyFilters() {
+    if (!dataset?.id) return;
+    setApplying(true); setFilteredCount(null);
+    try {
+      const res  = await fetch(`${FILTER_API}/datasets/${dataset.id}/filter-count`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rules }),
+      });
+      const data = await res.json();
+      if (data.ok) { setFilteredCount(data.count); setTotalCount(data.total); }
+    } catch {}
+    setApplying(false);
+  }
+
   const activeCount = rules.filter((r) => r.val.trim() || r.op === "is empty").length;
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: T.text, fontFamily: T.font }}>Filter features</div>
@@ -874,33 +989,96 @@ function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
         </div>
         {activeCount > 0 && <span style={{ background: T.accent, color: "white", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 700, fontFamily: T.font }}>{activeCount} active</span>}
       </div>
-      {rules.length === 0
-        ? <div style={{ padding: "16px 0", textAlign: "center", color: T.textLight, fontSize: 13, fontFamily: T.font }}>No filters — all features shown</div>
-        : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {rules.map((rule, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr auto", gap: 5, alignItems: "center", padding: "8px 10px", background: "rgba(0,0,0,0.03)", borderRadius: T.radiusSm, border: `1px solid ${T.border}` }}>
-              <select value={rule.col} onChange={(e) => updateRule(i, { col: e.target.value })} style={{ border: "none", background: "white", borderRadius: 6, padding: "4px 6px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>{MOCK_COLUMNS.map((c) => <option key={c} value={c}>{c}</option>)}</select>
-              <select value={rule.op} onChange={(e) => updateRule(i, { op: e.target.value })} style={{ border: "none", background: T.text, color: "white", borderRadius: 6, padding: "4px 5px", fontSize: 12, fontFamily: T.font, outline: "none", cursor: "pointer" }}>{OPS.map((op) => <option key={op} value={op}>{op}</option>)}</select>
-              {rule.op !== "is empty" ? <input value={rule.val} onChange={(e) => updateRule(i, { val: e.target.value })} placeholder="value…" style={{ border: "none", background: "white", borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}/> : <div/>}
-              <IconBtn onClick={() => removeRule(i)} danger><svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></IconBtn>
-            </div>
-          ))}
+
+      {/* Match count result */}
+      {filteredCount !== null && totalCount !== null && (
+        <div style={{ background: "rgba(37,99,235,0.07)", border: `1px solid rgba(37,99,235,0.2)`, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5 8h6M7 12h2" stroke={T.accent} strokeWidth="2" strokeLinecap="round"/></svg>
+          <span style={{ fontSize: 12, fontFamily: T.font }}>
+            <strong style={{ color: T.accent }}>{filteredCount.toLocaleString()}</strong>
+            <span style={{ color: T.textMuted }}> / {totalCount.toLocaleString()} features match</span>
+          </span>
         </div>
-      }
-      <button onClick={addRule} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 0", borderRadius: 10, border: `1.5px dashed ${T.border}`, background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, color: T.textMuted }}>
+      )}
+
+      {/* Rules */}
+      {colsLoading ? (
+        <div style={{ fontSize: 12, color: T.textLight, fontFamily: T.font, textAlign: "center", padding: "12px 0" }}>Loading columns…</div>
+      ) : rules.length === 0 ? (
+        <div style={{ padding: "16px 0", textAlign: "center", color: T.textLight, fontSize: 13, fontFamily: T.font }}>No filters — all features shown</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {rules.map((rule, i) => {
+            const vals = ruleValues[i] ?? [];
+            const valsLoading = ruleValLoading[i] ?? false;
+            return (
+              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px", background: "rgba(0,0,0,0.03)", borderRadius: T.radiusSm, border: `1px solid ${T.border}` }}>
+                {/* Row 1: column selector + op selector + remove */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 5, alignItems: "center" }}>
+                  <select value={rule.col} onChange={(e) => updateRule(i, { col: e.target.value })}
+                    style={{ border: "none", background: "white", borderRadius: 6, padding: "4px 6px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+                    {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select value={rule.op} onChange={(e) => updateRule(i, { op: e.target.value })}
+                    style={{ border: "none", background: T.text, color: "white", borderRadius: 6, padding: "4px 5px", fontSize: 12, fontFamily: T.font, outline: "none", cursor: "pointer" }}>
+                    {OPS.map((op) => <option key={op} value={op}>{op}</option>)}
+                  </select>
+                  <IconBtn onClick={() => removeRule(i)} danger>
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                  </IconBtn>
+                </div>
+
+                {/* Row 2: free-text input + values dropdown side by side */}
+                {rule.op !== "is empty" && (
+                  <div style={{ display: "grid", gridTemplateColumns: vals.length > 0 ? "1fr auto" : "1fr", gap: 5, alignItems: "center" }}>
+                    <input
+                      value={rule.val}
+                      onChange={(e) => updateRule(i, { val: e.target.value })}
+                      placeholder="Type a value…"
+                      style={{ border: `1px solid ${T.border}`, background: "white", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", width: "100%", boxSizing: "border-box" as const }}
+                    />
+                    {valsLoading && (
+                      <span style={{ fontSize: 10, color: T.textLight, padding: "0 6px" }}>…</span>
+                    )}
+                    {!valsLoading && vals.length > 0 && (
+                      <select
+                        value={rule.val}
+                        onChange={(e) => { if (e.target.value) updateRule(i, { val: e.target.value }); }}
+                        style={{ border: `1px solid ${T.border}`, background: "white", borderRadius: 6, padding: "5px 6px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}
+                      >
+                        <option value="">Select</option>
+                        {vals.map(({ value }) => (
+                          <option key={value} value={value}>{value}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add rule button */}
+      <button onClick={addRule} disabled={columns.length === 0}
+        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 0", borderRadius: 10, border: `1.5px dashed ${T.border}`, background: "transparent", cursor: columns.length === 0 ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, color: T.textMuted, opacity: columns.length === 0 ? 0.5 : 1 }}>
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
         Add filter rule
       </button>
+
+      {/* Clear / Apply */}
       {rules.length > 0 && (
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setRules([])} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: `1px solid ${T.border}`, background: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, color: T.textMuted }}>Clear all</button>
-          <button style={{ flex: 2, padding: "7px 0", borderRadius: 8, border: "none", background: T.accent, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, color: "white" }}>Apply filters</button>
+          <button onClick={clearAll} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: `1px solid ${T.border}`, background: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, color: T.textMuted }}>Clear all</button>
+          <button onClick={applyFilters} disabled={applying} style={{ flex: 2, padding: "7px 0", borderRadius: 8, border: "none", background: applying ? T.border : T.accent, cursor: applying ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600, fontFamily: T.font, color: "white" }}>
+            {applying ? "Applying…" : "Apply filters"}
+          </button>
         </div>
       )}
     </div>
   );
 }
-
 
 // ─── Attribute Table ──────────────────────────────────────────────────────────
 const API_BASE = "http://localhost:8787";
