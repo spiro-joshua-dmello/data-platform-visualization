@@ -25,21 +25,27 @@ const T = {
 };
 
 // ─── Colour palettes ──────────────────────────────────────────────────────────
-const DISCRETE_PALETTES: Record<string, string[]> = {
-  "Tableau":  ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac"],
-  "Pastel":   ["#aec6cf","#ffb347","#b5ead7","#c7ceea","#ffdac1","#e2f0cb","#ff9aa2","#f8d9d9","#c4faf8","#b5ead7"],
-  "Bold":     ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#999999","#66c2a5","#fc8d62"],
-  "Earthy":   ["#a0522d","#6b8e23","#4682b4","#d2691e","#708090","#556b2f","#8b4513","#2e8b57","#800000","#4169e1"],
+const CAT_PALETTES: Record<string, string[]> = {
+  "Felt":    ["#e63946","#f4a261","#2a9d8f","#457b9d","#8338ec","#fb5607","#3a86ff","#06d6a0","#ffbe0b","#ff006e"],
+  "Tableau": ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac"],
+  "QGIS":   ["#1f78b4","#33a02c","#e31a1c","#ff7f00","#6a3d9a","#b15928","#a6cee3","#b2df8a","#fb9a99","#fdbf6f"],
+  "Pastel":  ["#aec6cf","#ffb347","#b5ead7","#c7ceea","#ffdac1","#e2f0cb","#ff9aa2","#f8d9d9","#c4faf8","#dcd3ff"],
+  "Bold":    ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#999999","#66c2a5","#fc8d62"],
 };
 
-const CONTINUOUS_PALETTES: Record<string, [string, string]> = {
-  "Blue":    ["#dbeafe", "#1d4ed8"],
-  "Green":   ["#dcfce7", "#15803d"],
-  "Orange":  ["#fff7ed", "#c2410c"],
-  "Purple":  ["#f5f3ff", "#6d28d9"],
-  "Red":     ["#fef2f2", "#b91c1c"],
-  "Viridis": ["#fde725", "#440154"],
-  "Plasma":  ["#f0f921", "#0d0887"],
+const RAMP_PALETTES: Record<string, string[]> = {
+  "Blues":    ["#f7fbff","#c6dbef","#6baed6","#2171b5","#084594"],
+  "Greens":   ["#f7fcf5","#c7e9c0","#74c476","#238b45","#00441b"],
+  "Greys":    ["#ffffff","#d9d9d9","#969696","#525252","#000000"],
+  "Reds":     ["#fff5f0","#fcbba1","#fb6a4a","#cb181d","#67000d"],
+  "Viridis":  ["#fde725","#7ad151","#22a884","#2a788e","#414487","#440154"],
+  "Magma":    ["#fcfdbf","#feca8d","#fd9668","#de4968","#9b179e","#000004"],
+  "Inferno":  ["#fcffa4","#f7d13d","#fb9b06","#d44842","#8d0a6d","#000004"],
+  "Plasma":   ["#f0f921","#fca636","#e16462","#b12a90","#6a00a8","#0d0887"],
+  "Cividis":  ["#fde737","#9fda3a","#4ac16d","#1fa187","#277f8e","#365c8d","#46327e","#440154"],
+  "Spectral": ["#d53e4f","#f46d43","#fdae61","#ffffbf","#abdda4","#66c2a5","#3288bd"],
+  "RdYlGn":  ["#d73027","#f46d43","#fee08b","#d9ef8b","#66bd63","#1a9850"],
+  "Turbo":    ["#23171b","#4a58dd","#2af5b0","#a8fc3b","#fca50a","#bf3d1e"],
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -660,7 +666,7 @@ function NotesTab() {
 
 // ─── Style Dialog ─────────────────────────────────────────────────────────────
 function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => void }) {
-  const { layers, datasets, updateLayer } = useAppStore();
+  const { layers, datasets, updateLayer, setFilterRules } = useAppStore();
   const [minimized, setMinimized] = useState(false);
   const [tab, setTab] = useState<"style"|"symbology"|"filter">("style");
   const layer = layers.find((l) => l.id === layerId);
@@ -778,94 +784,284 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
 }
 
 // ─── Symbology Tab ────────────────────────────────────────────────────────────
-const MOCK_COLUMNS = ["status", "category", "value", "type", "name"];
-const MOCK_VALUES: Record<string, string[]> = {
-  status:   ["active", "inactive", "pending"],
-  category: ["A", "B", "C", "D"],
-  value:    [],
-  type:     ["primary", "secondary", "tertiary"],
-  name:     [],
+const DISCRETE_PALETTES_V2: Record<string, string[]> = {
+  "Felt":      ["#e63946","#f4a261","#2a9d8f","#457b9d","#8338ec","#fb5607","#3a86ff","#06d6a0","#ffbe0b","#ff006e"],
+  "Tableau":   ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac"],
+  "QGIS":      ["#1f78b4","#33a02c","#e31a1c","#ff7f00","#6a3d9a","#b15928","#a6cee3","#b2df8a","#fb9a99","#fdbf6f"],
+  "Pastel":    ["#aec6cf","#ffb347","#b5ead7","#c7ceea","#ffdac1","#e2f0cb","#ff9aa2","#f8d9d9","#c4faf8","#dcd3ff"],
+  "Bold":      ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#999999","#66c2a5","#fc8d62"],
+  "Earthy":    ["#a0522d","#6b8e23","#4682b4","#d2691e","#708090","#556b2f","#8b4513","#2e8b57","#800000","#4169e1"],
 };
 
+const CONTINUOUS_PALETTES_V2: Record<string, string[]> = {
+  "Blues":     ["#dbeafe","#93c5fd","#3b82f6","#1d4ed8","#1e3a8a"],
+  "Greens":    ["#dcfce7","#86efac","#22c55e","#15803d","#14532d"],
+  "Oranges":   ["#fff7ed","#fed7aa","#fb923c","#ea580c","#7c2d12"],
+  "Purples":   ["#f5f3ff","#c4b5fd","#8b5cf6","#6d28d9","#3b0764"],
+  "Reds":      ["#fef2f2","#fca5a5","#ef4444","#b91c1c","#450a0a"],
+  "Viridis":   ["#fde725","#7ad151","#22a884","#2a788e","#414487","#440154"],
+  "Plasma":    ["#f0f921","#fca636","#e16462","#b12a90","#6a00a8","#0d0887"],
+  "Magma":     ["#fcfdbf","#feca8d","#fd9668","#de4968","#9b179e","#000004"],
+  "Inferno":   ["#fcffa4","#f7d13d","#fb9b06","#d44842","#8d0a6d","#000004"],
+  "RdYlGn":    ["#d73027","#f46d43","#fee08b","#d9ef8b","#66bd63","#1a9850"],
+};
+
+// ─── Symbology Tab ────────────────────────────────────────────────────────────
 function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
-  const [mode, setMode]           = useState<"single"|"discrete"|"continuous">("single");
-  const [attrCol, setAttrCol]     = useState(MOCK_COLUMNS[0]);
-  const [discPalette, setDiscPalette] = useState("Tableau");
-  const [contPalette, setContPalette] = useState("Blue");
-  const isNumeric = (MOCK_VALUES[attrCol]?.length ?? 0) === 0;
-  const discreteColors = DISCRETE_PALETTES[discPalette];
-  const [contFrom, contTo] = CONTINUOUS_PALETTES[contPalette];
-  const catValues = MOCK_VALUES[attrCol] ?? [];
+  const { datasets } = useAppStore();
+  const dataset = datasets.find((d) => d.id === layer.datasetId);
+
+  const existing = layer.symbology;
+  const [mode, setMode]               = useState<"single"|"categorized"|"graduated">(existing?.mode ?? "single");
+  const [attrCol, setAttrCol]         = useState(existing?.col ?? "");
+  const [catPalette, setCatPalette]   = useState(existing?.palette ?? "Felt");
+  const [rampPalette, setRampPalette] = useState(existing?.palette ?? "Viridis");
+  const [columns, setColumns]         = useState<string[]>([]);
+  const [colValues, setColValues]     = useState<string[]>([]);
+  const [colLoading, setColLoading]   = useState(false);
+  const [applied, setApplied]         = useState(false);
+
+  useEffect(() => {
+    if (!dataset?.id) return;
+    setColLoading(true);
+    fetch(`${API}/datasets/${dataset.id}/columns`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) {
+          const cols = (data.columns as string[]).filter((c) => c !== "dataset_id" && c !== "_fid");
+          setColumns(cols);
+          if (!attrCol && cols.length > 0) setAttrCol(cols[0]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setColLoading(false));
+  }, [dataset?.id]);
+
+  useEffect(() => {
+    if (!dataset?.id || !attrCol || mode === "single") return;
+    fetch(`${API}/datasets/${dataset.id}/column-values/${encodeURIComponent(attrCol)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) setColValues((data.values ?? []).map((v: any) => String(v.value)));
+      })
+      .catch(() => setColValues([]));
+  }, [dataset?.id, attrCol, mode]);
+
+  function applySymbology() {
+    if (mode === "single") {
+      updateLayer(layer.id, { symbology: { mode: "single" } });
+    } else if (mode === "categorized") {
+      updateLayer(layer.id, { symbology: { mode: "categorized", col: attrCol, palette: catPalette, colors: CAT_PALETTES[catPalette], values: colValues } });
+    } else if (mode === "graduated") {
+      updateLayer(layer.id, { symbology: { mode: "graduated", col: attrCol, palette: rampPalette, colors: RAMP_PALETTES[rampPalette] } });
+    }
+    setApplied(true);
+    setTimeout(() => setApplied(false), 1500);
+  }
+
+  const catColors = CAT_PALETTES[catPalette];
+  const rampColors = RAMP_PALETTES[rampPalette];
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
       <div>
-        <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Colour by</div>
+        <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Symbol type</div>
         <div style={{ display: "flex", gap: 4 }}>
-          {(["single","discrete","continuous"] as const).map((m) => (
+          {(["single","categorized","graduated"] as const).map((m) => (
             <button key={m} onClick={() => setMode(m)} style={{
               flex: 1, padding: "5px 0", borderRadius: 8, border: "none", cursor: "pointer",
               fontSize: 11, fontWeight: 600, fontFamily: T.font, textTransform: "capitalize",
               background: mode === m ? T.text : "rgba(0,0,0,0.05)",
               color: mode === m ? "white" : T.textMuted,
-            }}>{m}</button>
+            }}>{m === "single" ? "Single" : m === "categorized" ? "Categorized" : "Graduated"}</button>
           ))}
         </div>
       </div>
+
+      {mode === "single" && (
+        <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font }}>
+          Use the <strong>Style</strong> tab to set a single colour for all features.
+        </div>
+      )}
+
       {mode !== "single" && (
         <div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Attribute column</div>
-          <select value={attrCol} onChange={(e) => setAttrCol(e.target.value)} style={{ width: "100%", padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${T.border}`, fontSize: 13, fontFamily: T.font, background: "white", color: T.text, outline: "none", cursor: "pointer" }}>
-            {MOCK_COLUMNS.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Value column</div>
+          {colLoading
+            ? <div style={{ fontSize: 12, color: T.textLight, fontFamily: T.font }}>Loading…</div>
+            : <select value={attrCol} onChange={(e) => setAttrCol(e.target.value)} style={{ width: "100%", padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${T.border}`, fontSize: 13, fontFamily: T.font, background: "white", color: T.text, outline: "none", cursor: "pointer" }}>
+                {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+          }
         </div>
       )}
-      {mode === "single" && <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font, padding: "8px 0" }}>Use the <strong>Style</strong> tab to set a single uniform colour.</div>}
-      {mode === "discrete" && (
+
+      {mode === "categorized" && (
+        <>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Colour palette</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {Object.entries(CAT_PALETTES).map(([name, colors]) => (
+                <button key={name} onClick={() => setCatPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${catPalette === name ? T.accent : T.border}`, background: catPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 52, textAlign: "left" }}>{name}</span>
+                  <div style={{ display: "flex", gap: 2 }}>
+                    {colors.map((c, i) => <div key={i} style={{ width: 13, height: 13, borderRadius: 3, background: c }}/>)}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+          {colValues.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Legend preview</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {colValues.slice(0, 8).map((val, i) => (
+                  <div key={val} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 14, height: 14, borderRadius: 3, background: catColors[i % catColors.length], flexShrink: 0 }}/>
+                    <span style={{ fontSize: 11, color: T.text, fontFamily: T.font }}>{val}</span>
+                  </div>
+                ))}
+                {colValues.length > 8 && <span style={{ fontSize: 11, color: T.textLight, fontFamily: T.font }}>+{colValues.length - 8} more</span>}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {mode === "graduated" && (
         <div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Palette</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {Object.entries(DISCRETE_PALETTES).map(([name, colors]) => (
-              <button key={name} onClick={() => setDiscPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${discPalette === name ? T.accent : T.border}`, background: discPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 50, textAlign: "left" }}>{name}</span>
-                <div style={{ display: "flex", gap: 2, flex: 1 }}>
-                  {colors.slice(0, 8).map((c, i) => <div key={i} style={{ width: 14, height: 14, borderRadius: 3, background: c, flexShrink: 0 }}/>)}
-                </div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Colour ramp</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {Object.entries(RAMP_PALETTES).map(([name, colors]) => (
+              <button key={name} onClick={() => setRampPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${rampPalette === name ? T.accent : T.border}`, background: rampPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 52, textAlign: "left" }}>{name}</span>
+                <div style={{ flex: 1, height: 14, borderRadius: 4, background: `linear-gradient(to right, ${colors[0]}, ${colors[Math.floor(colors.length/2)]}, ${colors[colors.length-1]})` }}/>
               </button>
             ))}
           </div>
         </div>
       )}
-      {mode === "continuous" && (
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Colour ramp</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {Object.entries(CONTINUOUS_PALETTES).map(([name, [from, to]]) => (
-              <button key={name} onClick={() => setContPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${contPalette === name ? T.accent : T.border}`, background: contPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 50, textAlign: "left" }}>{name}</span>
-                <div style={{ flex: 1, height: 14, borderRadius: 4, background: `linear-gradient(to right, ${from}, ${to})` }}/>
-              </button>
-            ))}
-          </div>
+
+      {mode !== "single" && (
+        <button onClick={applySymbology} style={{
+          padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
+          fontSize: 12, fontWeight: 600, fontFamily: T.font,
+          background: applied ? T.green : T.accent, color: "white",
+        }}>
+          {applied ? "✓ Applied" : "Apply symbology"}
+        </button>
+      )}
+    </div>
+  );
+}
+// ─── Filter Tab ───────────────────────────────────────────────────────────────
+type FilterRule = { col: string; op: string; val: string };
+const OPS = ["=", "≠", ">", "<", "≥", "≤", "contains", "is empty"];
+const FILTER_API = "http://localhost:8787";
+
+
+function MultiSelectDropdown({ vals, valsLoading, selected, onChange }: {
+  vals: { value: string }[];
+  valsLoading: boolean;
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  if (valsLoading) return <div style={{ fontSize: 12, color: T.textLight, fontFamily: T.font, padding: "8px 4px" }}>Loading values…</div>;
+  if (vals.length === 0) return (
+    <input
+      value={selected[0] ?? ""}
+      onChange={(e) => onChange(e.target.value ? [e.target.value] : [])}
+      placeholder="Type a value…"
+      style={{ border: `1px solid ${T.border}`, background: "white", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", width: "100%", boxSizing: "border-box" as const }}
+    />
+  );
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      {/* Trigger box */}
+      <div
+        onClick={() => setOpen((o) => !o)}
+        style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 10px", background: "white", cursor: "pointer", display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5, minHeight: 34 }}
+      >
+        {selected.length === 0 ? (
+          <span style={{ fontSize: 12, color: T.textLight, fontFamily: T.font }}>Select values…</span>
+        ) : (
+          selected.map((v) => (
+            <span key={v} style={{ display: "flex", alignItems: "center", gap: 4, background: "rgba(37,99,235,0.1)", color: T.accent, borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 600, fontFamily: T.font }}>
+              {v === "" ? "No Data" : v}
+              <span
+                onClick={(e) => { e.stopPropagation(); onChange(selected.filter((s) => s !== v)); }}
+                style={{ cursor: "pointer", fontWeight: 700, fontSize: 13, lineHeight: 1 }}
+              >×</span>
+            </span>
+          ))
+        )}
+        <svg style={{ marginLeft: "auto", flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} width="12" height="12" viewBox="0 0 16 16" fill="none">
+          <path d="M4 6l4 4 4-4" stroke={T.textMuted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+
+      {/* Dropdown list */}
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 999, background: "white", border: `1px solid ${T.border}`, borderRadius: 8, boxShadow: T.shadow, maxHeight: 220, overflowY: "auto" }}>
+          {vals.map(({ value }) => {
+            const strVal = String(value);
+            const checked = selected.includes(strVal);
+            return (
+              <label key={strVal || "__empty__"} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, background: checked ? "rgba(37,99,235,0.05)" : "white" }}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...selected, strVal]
+                      : selected.filter((v) => v !== strVal);
+                    onChange(next);
+                  }}
+                  style={{ accentColor: T.accent, width: 14, height: 14, flexShrink: 0 }}
+                />
+                {checked && <svg style={{ flexShrink: 0, marginLeft: -2 }} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-6" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                <span style={{ fontSize: 13, fontFamily: T.font, color: strVal === "" ? T.textLight : T.text, fontStyle: strVal === "" ? "italic" : "normal" }}>
+                  {strVal === "" ? "No Data" : strVal}
+                </span>
+              </label>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-
-// ─── Filter Tab ───────────────────────────────────────────────────────────────
-type FilterRule = { col: string; op: string; val: string };
-const OPS = ["=", "≠", ">", "<", "≥", "≤", "contains", "is empty"];
-const FILTER_API = "http://localhost:8787";
-
 function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
-  const { datasets, setFilterRules } = useAppStore();
+  const { datasets, setFilterRules, setUiRules, filterRules } = useAppStore();
   const dataset = datasets.find((d) => d.id === layer.datasetId);
-  console.log("[filter] dataset:", dataset, "layer:", layer);
-  const [rules, setRules]             = useState<FilterRule[]>([]);
+  
+  const stored = filterRules[dataset?.id ?? ""];
+  const [rules, setRulesLocal] = useState<FilterRule[]>(stored?.uiRules ?? []);
+  const [matchMode, setMatchMode] = useState<"AND"|"OR">(stored?.matchMode ?? "AND");
+
+  function setRules(r: FilterRule[] | ((prev: FilterRule[]) => FilterRule[])) {
+    setRulesLocal((prev) => {
+      const next = typeof r === "function" ? r(prev) : r;
+      if (dataset?.id) setUiRules(dataset.id, next);
+      return next;
+    });
+  }
   const [columns, setColumns]         = useState<string[]>([]);
   const [colsLoading, setColsLoading] = useState(false);
+  
   const [ruleValues, setRuleValues]   = useState<Record<number, { value: string; count: number }[]>>({});
   const [ruleValLoading, setRuleValLoading] = useState<Record<number, boolean>>({});
   const [filteredCount, setFilteredCount]   = useState<number | null>(null);
@@ -876,17 +1072,26 @@ function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
   useEffect(() => {
     if (!dataset?.id) return;
     setColsLoading(true);
-    console.log("[filter] fetching columns for dataset", dataset.id);
+    
     fetch(`${FILTER_API}/datasets/${dataset.id}/columns`)
       .then((r) => r.json())
       .then((data) => {
-        console.log("[filter] columns response:", data);
+        
         if (data.ok) setColumns(data.columns ?? []);
       })
       .catch((err) => {
         console.error("[filter] columns fetch failed:", err);
       })
       .finally(() => setColsLoading(false));
+  }, [dataset?.id]);
+
+
+  // Reload values for existing rules when tab remounts
+  useEffect(() => {
+    if (!dataset?.id || rules.length === 0) return;
+    rules.forEach((rule, i) => {
+      if (rule.col) loadValuesForRule(i, rule.col, dataset.id);
+    });
   }, [dataset?.id]);
 
   async function loadValuesForRule(index: number, col: string, dsId: string) {
@@ -900,28 +1105,13 @@ function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
     setRuleValLoading((prev) => ({ ...prev, [index]: false }));
   }
   
-  async function applyFilters() {
-    if (!dataset?.id) return;
-    setApplying(true);
-    setFilteredCount(null);
-    // Push to store so MapView reacts immediately
-    setFilterRules(dataset.id, rules);
-    try {
-      const res = await fetch(`${FILTER_API}/datasets/${dataset.id}/filter-count`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rules }),
-      });
-      const data = await res.json();
-      if (data.ok) { setFilteredCount(data.count); setTotalCount(data.total); }
-    } catch {}
-    setApplying(false);
-  }
 
   function clearAll() {
-    setRules([]); setRuleValues({});
-    setFilteredCount(null); setTotalCount(null);
-    if (dataset?.id) setFilterRules(dataset.id, []); // clear map filter too
+    setRulesLocal([]);
+    setRuleValues({});
+    setFilteredCount(null);
+    setTotalCount(null);
+    if (dataset?.id) setFilterRules(dataset.id, [], matchMode);
   }
 
 
@@ -957,16 +1147,14 @@ function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
     setFilteredCount(null);
   }
 
-  function clearAll() {
-    setRules([]); setRuleValues({});
-    setFilteredCount(null); setTotalCount(null);
-  }
 
   async function applyFilters() {
     if (!dataset?.id) return;
-    setApplying(true); setFilteredCount(null);
+    setApplying(true);
+    setFilteredCount(null);
+    setFilterRules(dataset.id, rules, matchMode);
     try {
-      const res  = await fetch(`${FILTER_API}/datasets/${dataset.id}/filter-count`, {
+      const res = await fetch(`${FILTER_API}/datasets/${dataset.id}/filter-count`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rules }),
@@ -976,8 +1164,8 @@ function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
     } catch {}
     setApplying(false);
   }
-
-  const activeCount = rules.filter((r) => r.val.trim() || r.op === "is empty").length;
+  
+  const activeCount = rules.filter((r) => (r.vals?.length ?? 0) > 0 || r.val.trim() || r.op === "is empty").length;
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1028,35 +1216,34 @@ function FilterTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
                   </IconBtn>
                 </div>
 
-                {/* Row 2: free-text input + values dropdown side by side */}
                 {rule.op !== "is empty" && (
-                  <div style={{ display: "grid", gridTemplateColumns: vals.length > 0 ? "1fr auto" : "1fr", gap: 5, alignItems: "center" }}>
-                    <input
-                      value={rule.val}
-                      onChange={(e) => updateRule(i, { val: e.target.value })}
-                      placeholder="Type a value…"
-                      style={{ border: `1px solid ${T.border}`, background: "white", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", width: "100%", boxSizing: "border-box" as const }}
-                    />
-                    {valsLoading && (
-                      <span style={{ fontSize: 10, color: T.textLight, padding: "0 6px" }}>…</span>
-                    )}
-                    {!valsLoading && vals.length > 0 && (
-                      <select
-                        value={rule.val}
-                        onChange={(e) => { if (e.target.value) updateRule(i, { val: e.target.value }); }}
-                        style={{ border: `1px solid ${T.border}`, background: "white", borderRadius: 6, padding: "5px 6px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}
-                      >
-                        <option value="">Select</option>
-                        {vals.map(({ value }) => (
-                          <option key={value} value={value}>{value}</option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
+                  <MultiSelectDropdown
+                    vals={vals}
+                    valsLoading={valsLoading}
+                    selected={rule.vals ?? (rule.val ? [rule.val] : [])}
+                    onChange={(next) => updateRule(i, { vals: next, val: next[0] ?? "" })}
+                  />
                 )}
               </div>
             );
           })}
+        </div>
+      )}
+      
+      
+      {rules.length > 1 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0" }}>
+          <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>Match</span>
+          {(["AND","OR"] as const).map((m) => (
+            <button key={m} onClick={() => setMatchMode(m)} style={{
+              padding: "2px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+              fontFamily: T.font, cursor: "pointer",
+              background: matchMode === m ? T.accent : "transparent",
+              color: matchMode === m ? "white" : T.textMuted,
+              border: `1px solid ${matchMode === m ? T.accent : T.border}`,
+            }}>{m}</button>
+          ))}
+          <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>rules</span>
         </div>
       )}
 

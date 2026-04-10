@@ -12,6 +12,11 @@ export type Dataset = {
   bounds?: Bounds | null;
 };
 
+export type Symbology =
+  | { mode: "single" }
+  | { mode: "categorized"; col: string; palette: string; colors: string[]; values: string[] }
+  | { mode: "graduated"; col: string; palette: string; colors: string[] };
+
 export type LayerConfig = {
   id: string;
   datasetId: string;
@@ -20,6 +25,7 @@ export type LayerConfig = {
   visible: boolean;
   opacity: number;
   color: [number, number, number];
+  symbology?: Symbology;
 };
 
 export type ViewState = {

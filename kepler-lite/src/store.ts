@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { Dataset, LayerConfig, ViewState, Bounds } from "./types";
 
 export type ActiveTool = "pointer" | "annotate" | "measure" | "pan" | "upload";
@@ -26,7 +27,7 @@ type ZoomTarget = {
   id: number;
 };
 
-export type FilterRule = { col: string; op: string; val: string };
+export type FilterRule = { col: string; op: string; val: string; vals?: string[] };
 
 type AppState = {
   datasets: Dataset[];
@@ -72,13 +73,14 @@ type AppState = {
   setMeasurePoints: (pts: [number, number][]) => void;
 
   // ── Filter rules ──────────────────────────────────────────────────────────
-  filterRules: Record<string, FilterRule[]>;
-  setFilterRules: (datasetId: string, rules: FilterRule[]) => void;
+  filterRules: Record<string, { rules: FilterRule[]; matchMode: "AND"|"OR"; uiRules: FilterRule[] }>;
+  setFilterRules: (datasetId: string, rules: FilterRule[], matchMode?: "AND"|"OR") => void;
+  setUiRules: (datasetId: string, uiRules: FilterRule[]) => void;
 };
 
 let _zoomTargetId = 0;
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>()(persist((set) => ({
   datasets: [],
   layers: [],
   annotations: [],
@@ -103,7 +105,7 @@ export const useAppStore = create<AppState>((set) => ({
         id: ++_zoomTargetId,
       },
     }),
-
+  
   uploadOpen: false,
   setUploadOpen: (open) => set({ uploadOpen: open }),
 
@@ -189,6 +191,27 @@ export const useAppStore = create<AppState>((set) => ({
 
   // ── Filter rules ─────────────────────────────────────────────────────────
   filterRules: {},
-  setFilterRules: (datasetId, rules) =>
-    set((s) => ({ filterRules: { ...s.filterRules, [datasetId]: rules } })),
+  setFilterRules: (datasetId, rules, matchMode = "AND") => {
+    
+    set((s) => {
+      const updated = { ...s.filterRules };
+      if (rules.length === 0) {
+        delete updated[datasetId];
+      } else {
+        updated[datasetId] = { rules, matchMode, uiRules: rules };
+      }
+      return { filterRules: updated };
+    });
+  },
+  setUiRules: (datasetId, uiRules) =>
+    set((s) => ({ filterRules: { ...s.filterRules, [datasetId]: { ...(s.filterRules[datasetId] ?? { rules: [], matchMode: "AND" }), uiRules } }})),
+}), {
+  name: "kepler-lite-store",
+  partialize: (state) => ({
+    layers:      state.layers,
+    viewState:   state.viewState,
+    annotations: state.annotations,
+    mapPins:     state.mapPins,
+    filterRules: state.filterRules,
+  }),
 }));
