@@ -13,6 +13,7 @@ export type InspectResponse =
       suggestions: {
         latColumn: string | null;
         lngColumn: string | null;
+        wktColumn?: string;
       };
       suggestedLayerType?: "circle";
     }
@@ -101,9 +102,10 @@ export function uploadDatasetWithProgress(opts: {
   file: File;
   latColumn?: string;
   lngColumn?: string;
+  wktColumn?: string;
   onProgress?: (pct: number) => void;
 }): Promise<UploadResponse> {
-  const { file, latColumn, lngColumn, onProgress } = opts;
+  const { file, latColumn, lngColumn, wktColumn, onProgress } = opts;
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -145,6 +147,7 @@ export function uploadDatasetWithProgress(opts: {
     form.append("file", file);
     if (latColumn) form.append("latColumn", latColumn);
     if (lngColumn) form.append("lngColumn", lngColumn);
+    if (wktColumn) form.append("wktColumn", wktColumn);
 
     xhr.send(form);
   });
@@ -158,6 +161,7 @@ async function initChunkedUpload(opts: {
   totalChunks: number;
   latColumn?: string;
   lngColumn?: string;
+  wktColumn?: string;
 }): Promise<{ ok: true; uploadId: string }> {
   const res = await fetch(`${UPLOAD_BASE}/datasets/upload/init`, {
     method: "POST",
@@ -237,9 +241,10 @@ export async function uploadDatasetChunked(opts: {
   file: File;
   latColumn?: string;
   lngColumn?: string;
+  wktColumn?: string;
   onProgress?: (pct: number) => void;
 }): Promise<UploadResponse> {
-  const { file, latColumn, lngColumn, onProgress } = opts;
+  const { file, latColumn, lngColumn, wktColumn, onProgress } = opts;
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
   // Step 1: init session (0%)
@@ -249,6 +254,7 @@ export async function uploadDatasetChunked(opts: {
     totalChunks,
     latColumn,
     lngColumn,
+    wktColumn,
   });
 
   // Step 2: upload chunks (0% → 80%)
@@ -282,6 +288,7 @@ export async function uploadDataset(opts: {
   file: File;
   latColumn?: string;
   lngColumn?: string;
+  wktColumn?: string;
   onProgress?: (pct: number) => void;
 }): Promise<UploadResponse> {
   if (opts.file.size > CHUNKED_THRESHOLD) {

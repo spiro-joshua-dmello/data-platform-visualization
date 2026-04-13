@@ -85,17 +85,50 @@ function IconBtn({ onClick, title, children, danger = false, active = false }: {
 }) {
   const [hov, setHov] = useState(false);
   return (
-    <button onClick={onClick} title={title}
-      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-      style={{
-        width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center",
-        borderRadius: T.radiusXs, border: "none", cursor: "pointer", padding: 0,
-        background: active ? T.accent : hov ? (danger ? T.hoverRed : T.hover) : "transparent",
-        color: active ? "white" : hov ? (danger ? T.red : T.text) : T.textLight,
-        transition: "background 0.12s, color 0.12s",
-      }}>
-      {children}
-    </button>
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <button onClick={onClick}
+        onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+        style={{
+          width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center",
+          borderRadius: T.radiusXs, border: "none", cursor: "pointer", padding: 0,
+          background: active ? T.accent : hov ? (danger ? T.hoverRed : T.hover) : "transparent",
+          color: active ? "white" : hov ? (danger ? T.red : T.text) : T.textLight,
+          transition: "background 0.12s, color 0.12s",
+        }}>
+        {children}
+      </button>
+      {hov && title && (
+        <div style={{
+          position: "absolute",
+          bottom: "calc(100% + 6px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "rgba(17,19,22,0.95)",
+          color: "#e7eaf0",
+          fontSize: 11,
+          fontWeight: 500,
+          fontFamily: T.font,
+          padding: "4px 8px",
+          borderRadius: 6,
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          zIndex: 9999,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+          border: "1px solid rgba(255,255,255,0.08)",
+        }}>
+          {title}
+          <div style={{
+            position: "absolute",
+            top: "100%", left: "50%",
+            transform: "translateX(-50%)",
+            width: 0, height: 0,
+            borderLeft: "4px solid transparent",
+            borderRight: "4px solid transparent",
+            borderTop: "4px solid rgba(17,19,22,0.95)",
+          }}/>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -462,8 +495,9 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
                 {/* Style */}
                 <IconBtn onClick={() => onStyleLayer(layer.id)} title="Style layer">
                   <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                    <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.8"/>
-                    <path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                    <rect x="2" y="2" width="12" height="3" rx="1" fill="currentColor" opacity="0.9"/>
+                    <rect x="2" y="6.5" width="12" height="3" rx="1" fill="currentColor" opacity="0.6"/>
+                    <rect x="2" y="11" width="12" height="3" rx="1" fill="currentColor" opacity="0.3"/>
                   </svg>
                 </IconBtn>
                 {/* Attribute table */}
@@ -473,6 +507,32 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
                     <path d="M1.5 7h13M5.5 7v6" stroke="currentColor" strokeWidth="1.5"/>
                   </svg>
                 </IconBtn>
+                {/* Export */}
+                {!editMode && (
+                  <IconBtn onClick={async () => {
+                    const ds = datasets.find((d: any) => d.id === layer.datasetId);
+                    if (!ds) return;
+                    const table = ds.renderType === "point" ? "points" : ds.renderType === "line" ? "lines" : "polygons";
+                    try {
+                      const res = await fetch(`${API}/datasets/${ds.datasetId}/features?table=${table}`);
+                      const fc = await res.json();
+                      const blob = new Blob([JSON.stringify(fc, null, 2)], { type: "application/geo+json" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `${ds.name.replace(/\.[^.]+$/, "")}.geojson`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    } catch (e) {
+                      console.error("Export failed:", e);
+                    }
+                  }} title="Export as GeoJSON">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M3 11v2h10v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                  </IconBtn>
+                )}
                 {/* Delete — always visible, calls backend */}
                 <IconBtn
                   onClick={() => { if (!isDeleting) void handleDelete(layer); }}
@@ -716,43 +776,40 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
 
           {tab === "style" && (
             <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Visible</span>
-                <Toggle checked={layer.visible} onChange={(v) => updateLayer(layer.id, { visible: v })}/>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Geometry type</div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  {allowedTypes.map((t) => (
-                    <button key={t} onClick={() => updateLayer(layer.id, { type: t as any })} style={{
-                      flex: 1, padding: "6px 0", borderRadius: 8, border: "none", cursor: "pointer",
-                      fontSize: 12, fontWeight: 600, fontFamily: T.font, textTransform: "capitalize",
-                      background: layer.type === t ? T.text : "rgba(0,0,0,0.05)",
-                      color: layer.type === t ? "white" : T.textMuted,
-                    }}>{t}</button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Colour</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input type="color" value={hex}
-                    onChange={(e) => updateLayer(layer.id, { color: hexToRgb(e.target.value) })}
-                    style={{ width: 38, height: 38, borderRadius: 8, border: `2px solid ${T.border}`, cursor: "pointer", padding: 2 }}
-                  />
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                    {SWATCHES.map((c) => (
-                      <button key={c} onClick={() => updateLayer(layer.id, { color: hexToRgb(c) })} style={{
-                        width: 20, height: 20, borderRadius: "50%", border: "2.5px solid white",
-                        background: c, cursor: "pointer", padding: 0,
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                        transform: hex === c ? "scale(1.2)" : "scale(1)", transition: "transform 0.12s",
-                      }}/>
+              {/* Geometry type */}
+              {allowedTypes.length > 1 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Geometry type</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {(["fill","line"] as const).filter(t => allowedTypes.includes(t)).map((t) => (
+                      <button key={t} onClick={() => updateLayer(layer.id, { type: t })} style={{
+                        flex: 1, padding: "5px 0", borderRadius: 8, border: "none", cursor: "pointer",
+                        fontSize: 11, fontWeight: 600, fontFamily: T.font, textTransform: "capitalize",
+                        background: layer.type === t ? T.text : "rgba(0,0,0,0.05)",
+                        color: layer.type === t ? "white" : T.textMuted,
+                      }}>{t === "fill" ? "Fill" : "Line"}</button>
                     ))}
                   </div>
                 </div>
+              )}
+              {/* Stroke width — only for line or fill-with-outline */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>
+                    {layer.type === "line" ? "Line width" : "Outline width"}
+                  </span>
+                  <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font }}>
+                    {(layer as any).strokeWidth ?? 1.5}px
+                  </span>
+                </div>
+                <input type="range" min={0.5} max={8} step={0.5}
+                  value={(layer as any).strokeWidth ?? 1.5}
+                  onChange={(e) => updateLayer(layer.id, { strokeWidth: Number(e.target.value) } as any)}
+                  style={{ width: "100%", accentColor: T.text }}
+                />
               </div>
-              <div> 
+              {/* Opacity */}
+              <div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                   <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Opacity</span>
                   <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font }}>{Math.round(layer.opacity * 100)}%</span>
@@ -762,6 +819,7 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
                   style={{ width: "100%", accentColor: T.text }}
                 />
               </div>
+              {/* Preview */}
               <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Preview</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: "rgba(0,0,0,0.03)", borderRadius: T.radiusSm }}>
@@ -810,6 +868,7 @@ const CONTINUOUS_PALETTES_V2: Record<string, string[]> = {
 function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
   const { datasets } = useAppStore();
   const dataset = datasets.find((d) => d.id === layer.datasetId);
+  const isPoint = dataset?.renderType === "point";
 
   const existing = layer.symbology;
   const [mode, setMode]               = useState<"single"|"categorized"|"graduated">(existing?.mode ?? "single");
@@ -818,8 +877,17 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
   const [rampPalette, setRampPalette] = useState(existing?.palette ?? "Viridis");
   const [columns, setColumns]         = useState<string[]>([]);
   const [colValues, setColValues]     = useState<string[]>([]);
+  // per-item colour overrides for categorized; key = value string, value = hex colour
+  const [catColorOverrides, setCatColorOverrides] = useState<Record<string,string>>({});
   const [colLoading, setColLoading]   = useState(false);
   const [applied, setApplied]         = useState(false);
+
+  // true when every non-empty value in the column parses as a finite number
+  const isNumericCol = colValues.length > 0 && colValues
+    .filter(v => v !== "" && v !== "No Data")
+    .every(v => Number.isFinite(Number(v)));
+  // numeric range for graduated
+  const [numRange, setNumRange]       = useState<[number,number]>([0, 100]);
 
   useEffect(() => {
     if (!dataset?.id) return;
@@ -842,18 +910,41 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
     fetch(`${API}/datasets/${dataset.id}/column-values/${encodeURIComponent(attrCol)}`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.ok) setColValues((data.values ?? []).map((v: any) => String(v.value)));
+        if (data.ok) {
+          const vals = (data.values ?? []).map((v: any) => {
+            const s = v.value === null || v.value === undefined ? "" : String(v.value);
+            return s;
+          });
+          setColValues(vals);
+          // compute numeric range for graduated
+          const nums = vals.map(Number).filter(Number.isFinite);
+          if (nums.length) setNumRange([Math.min(...nums), Math.max(...nums)]);
+        }
       })
-      .catch(() => setColValues([]));
+        .catch(() => setColValues([]));
   }, [dataset?.id, attrCol, mode]);
+
+  // Auto-switch away from graduated if column is non-numeric
+  useEffect(() => {
+    if (mode === "graduated" && colValues.length > 0) {
+      const numeric = colValues.filter(v => v !== "" && v !== "No Data").every(v => Number.isFinite(Number(v)));
+      if (!numeric) setMode("categorized");
+    }
+  }, [colValues, mode]);
+        
 
   function applySymbology() {
     if (mode === "single") {
       updateLayer(layer.id, { symbology: { mode: "single" } });
     } else if (mode === "categorized") {
-      updateLayer(layer.id, { symbology: { mode: "categorized", col: attrCol, palette: catPalette, colors: CAT_PALETTES[catPalette], values: colValues } });
+      // merge palette defaults with any per-item overrides
+      const basePalette = CAT_PALETTES[catPalette];
+      const finalColors = colValues.map((val, i) =>
+        catColorOverrides[val] ?? basePalette[i % basePalette.length]
+      );
+      updateLayer(layer.id, { symbology: { mode: "categorized", col: attrCol, palette: catPalette, colors: finalColors, values: colValues } });
     } else if (mode === "graduated") {
-      updateLayer(layer.id, { symbology: { mode: "graduated", col: attrCol, palette: rampPalette, colors: RAMP_PALETTES[rampPalette] } });
+      updateLayer(layer.id, { symbology: { mode: "graduated", col: attrCol, palette: rampPalette, colors: RAMP_PALETTES[rampPalette], min: numRange[0], max: numRange[1] } });
     }
     setApplied(true);
     setTimeout(() => setApplied(false), 1500);
@@ -867,7 +958,11 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
       <div>
         <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Symbol type</div>
         <div style={{ display: "flex", gap: 4 }}>
-          {(["single","categorized","graduated"] as const).map((m) => (
+          {(["single","categorized","graduated"] as const).filter(m => {
+            if (m === "graduated" && isPoint) return false;
+            if (m === "graduated" && !isNumericCol) return false;
+            return true;
+          }).map((m) => (
             <button key={m} onClick={() => setMode(m)} style={{
               flex: 1, padding: "5px 0", borderRadius: 8, border: "none", cursor: "pointer",
               fontSize: 11, fontWeight: 600, fontFamily: T.font, textTransform: "capitalize",
@@ -879,8 +974,26 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
       </div>
 
       {mode === "single" && (
-        <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font }}>
-          Use the <strong>Style</strong> tab to set a single colour for all features.
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Colour</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {["#ef4444","#f97316","#eab308","#22c55e","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f59e0b","#64748b"].map((c) => (
+              <button key={c} onClick={() => updateLayer(layer.id, { color: hexToRgb(c) })} style={{
+                width: 26, height: 26, borderRadius: "50%", border: "none", cursor: "pointer",
+                background: c, padding: 0,
+                outline: rgbToHex(layer.color) === c ? `3px solid ${c}` : "2px solid transparent",
+                outlineOffset: 2, transition: "transform 0.1s",
+                transform: rgbToHex(layer.color) === c ? "scale(1.2)" : "scale(1)",
+              }}/>
+            ))}
+            <label style={{ width: 26, height: 26, borderRadius: "50%", border: "2px dashed #ccc", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#aaa", flexShrink: 0 }}
+              title="Custom colour">
+              +
+              <input type="color" value={rgbToHex(layer.color)}
+                onChange={(e) => updateLayer(layer.id, { color: hexToRgb(e.target.value) })}
+                style={{ position: "absolute", opacity: 0, width: 0, height: 0 }}/>
+            </label>
+          </div>
         </div>
       )}
 
@@ -913,14 +1026,24 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
           </div>
           {colValues.length > 0 && (
             <div>
-              <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Legend preview</div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Legend preview <span style={{ fontSize: 10, color: T.textLight }}>(click swatch to edit colour)</span></div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {colValues.slice(0, 8).map((val, i) => (
-                  <div key={val} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 14, height: 14, borderRadius: 3, background: catColors[i % catColors.length], flexShrink: 0 }}/>
-                    <span style={{ fontSize: 11, color: T.text, fontFamily: T.font }}>{val}</span>
-                  </div>
-                ))}
+                {colValues.slice(0, 8).map((val, i) => {
+                  const displayLabel = val === "" || val === null ? "No Data" : val;
+                  const currentColor = catColorOverrides[val] ?? catColors[i % catColors.length];
+                  return (
+                    <div key={val} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <label style={{ position: "relative", width: 18, height: 18, borderRadius: 4, background: currentColor, flexShrink: 0, cursor: "pointer", border: "1.5px solid rgba(0,0,0,0.15)", display: "block" }}>
+                        <input type="color" value={currentColor} onChange={(e) => setCatColorOverrides(prev => ({ ...prev, [val]: e.target.value }))}
+                          style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer", top: 0, left: 0 }}
+                        />
+                      </label>
+                      <span style={{ fontSize: 11, color: val === "" ? T.textLight : T.text, fontFamily: T.font, fontStyle: val === "" ? "italic" : "normal" }}>
+                        {displayLabel}
+                      </span>
+                    </div>
+                  );
+                })}
                 {colValues.length > 8 && <span style={{ fontSize: 11, color: T.textLight, fontFamily: T.font }}>+{colValues.length - 8} more</span>}
               </div>
             </div>
@@ -942,7 +1065,7 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
         </div>
       )}
 
-      {mode !== "single" && (
+      {(
         <button onClick={applySymbology} style={{
           padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
           fontSize: 12, fontWeight: 600, fontFamily: T.font,

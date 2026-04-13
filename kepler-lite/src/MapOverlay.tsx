@@ -45,7 +45,12 @@ function fmtArea(km2: number) {
 
 // ── Pin marker ────────────────────────────────────────────────────────────────
 
-function PinMarker({ pin, onRemove, onLabelChange }: { pin: MapPin; onRemove: () => void; onLabelChange: (l: string) => void }) {
+function PinMarker({ pin, onRemove, onLabelChange, onMove }: {
+  pin: MapPin;
+  onRemove: () => void;
+  onLabelChange: (label: string) => void;
+  onMove?: (lng: number, lat: number) => void;
+}) {
   const [editing, setEditing] = useState(!pin.label);
   const [draft, setDraft] = useState(pin.label);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -54,7 +59,13 @@ function PinMarker({ pin, onRemove, onLabelChange }: { pin: MapPin; onRemove: ()
   useEffect(() => { if (!editing) setDraft(pin.label); }, [pin.label, editing]);
 
   return (
-    <Marker longitude={pin.lng} latitude={pin.lat} anchor="bottom">
+    <Marker
+      longitude={pin.lng}
+      latitude={pin.lat}
+      anchor="bottom"
+      draggable
+      onDragEnd={(e) => onMove?.(e.lngLat.lng, e.lngLat.lat)}
+    >
       <div
         style={{
           display: "flex",
@@ -407,6 +418,7 @@ export function MapPinsLayer() {
           pin={pin}
           onRemove={() => removeMapPin(pin.id)}
           onLabelChange={(label) => updateMapPin(pin.id, { label })}
+          onMove={(lng, lat) => updateMapPin(pin.id, { lng, lat })}
         />
       ))}
     </>
@@ -418,6 +430,7 @@ export function MapPinsLayer() {
 export function useMapToolHandler() {
   const {
     activeTool,
+    setActiveTool,
     addMapPin,
     mapPins,
     measurePoints,
@@ -441,14 +454,7 @@ export function useMapToolHandler() {
     if (!info.coordinate) return;
     const [lng, lat] = info.coordinate as [number, number];
     if (activeTool === "annotate") {
-      const colors = [
-        "#f97316",
-        "#3b82f6",
-        "#22c55e",
-        "#a855f7",
-        "#ef4444",
-        "#eab308",
-      ];
+      const colors = ["#f97316","#3b82f6","#22c55e","#a855f7","#ef4444","#eab308"];
       addMapPin({
         id: "pin-" + Date.now(),
         lng,
@@ -457,6 +463,8 @@ export function useMapToolHandler() {
         color: colors[mapPins.length % colors.length],
         createdAt: Date.now(),
       });
+      // Switch back to pointer so user must click Annotate again for the next pin
+      setActiveTool("pointer");
     }
     if (activeTool === "measure") {
       setMeasurePoints([...measurePoints, [lng, lat]]);

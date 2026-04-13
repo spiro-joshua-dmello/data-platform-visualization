@@ -30,7 +30,7 @@ type PendingChange =
   | { kind: "edit";   feature: GeoFeature; table: string }
   | { kind: "delete"; featureId: string;   table: string };
 
-type EditMode = "none" | "select" | "add-point" | "draw-line" | "draw-polygon";
+type EditMode = "none" | "select" | "add-point" | "draw-line" | "draw-polygon" | "move-feature";
 
 // ── sanitizeProps ─────────────────────────────────────────────────────────────
 
@@ -378,7 +378,7 @@ function ConfirmBar({ label, onConfirm, onCancel }: {
 
 function EditToolbar({
   editMode, setEditMode, activeDataset, loadedCount,
-  onExitEdit, onLoadFeatures,
+  onExitEdit, onLoadFeatures, onMoveMode,
 }: {
   editMode: EditMode;
   setEditMode: (m: EditMode) => void;
@@ -386,6 +386,7 @@ function EditToolbar({
   loadedCount: number;
   onExitEdit: () => void;
   onLoadFeatures: () => void;
+  onMoveMode: () => void;
 }) {
   if (!activeDataset) return null;
 
@@ -415,6 +416,7 @@ function EditToolbar({
       </div>
       <button onClick={onLoadFeatures} style={btn(false)}>⟳ Load</button>
       <button onClick={() => setEditMode("select")} style={btn(editMode === "select")}>↖ Select</button>
+      <button onClick={onMoveMode} style={btn(editMode === "move-feature")}>✥ Move</button>
       {activeDataset.renderType === "point" && (
         <button onClick={() => setEditMode("add-point")} style={btn(editMode === "add-point")}>+ Point</button>
       )}
@@ -617,7 +619,14 @@ export function MapView() {
   // Refs must be inside the component
   const mapRef = useRef<any>(null);
   const lastZoomTargetId = useRef<number>(-1);
-
+  const dragStartRef = useRef<Record<string, { lng: number; lat: number }>>({});
+  const editFeaturesRef = useRef<GeoFeature[]>([]);
+  const moveDragRef = useRef<{
+    feature: GeoFeature;
+    startLng: number;
+    startLat: number;
+    origGeom: any;
+  } | null>(null);
 
   
   // ── Zoom to layer via DeckGL FlyToInterpolator ───────────────────────────
@@ -651,6 +660,7 @@ export function MapView() {
 
   const [editFeatures, setEditFeatures]       = useState<GeoFeature[]>([]);
   const [localEditMode, setLocalEditMode]     = useState<EditMode>("none");
+  useEffect(() => { editFeaturesRef.current = editFeatures; }, [editFeatures]);
   const [selectedFeature, setSelectedFeature] = useState<GeoFeature | null>(null);
   const [selectionCount, setSelectionCount]   = useState(0);
   const [showAttrModal, setShowAttrModal]     = useState(false);
@@ -669,6 +679,108 @@ export function MapView() {
     activeDataset?.renderType === "line"  ? "lines"  : "polygons";
 
   
+  // ── Move-feature mouse drag (raw DOM) ────────────────────────────────────
+  // ── Move-feature mouse drag ───────────────────────────────────────────────
+  useEffect(() => {
+    console.log("🟣 move useEffect ran, mode=", localEditMode);
+    if (localEditMode !== "move-feature") return;
+    console.log("🔵 attaching move handlers");
+
+    function onDown(e: PointerEvent) {
+      if (e.button !== 0) return;
+      console.log("🔴 onDown fired");
+      const map = mapRef.current?.getMap?.();
+      if (!map) return;
+      const canvas = map.getCanvas();
+      const rect = canvas.getBoundingClientRect();
+      const ll = map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
+      const lng = ll.lng, lat = ll.lat;
+
+      const features = editFeaturesRef.current;
+      console.log("🔴 features count", features.length);
+      const pt = map.project([lng, lat]);
+      let best: GeoFeature | null = null;
+      let bestDist = 80;
+      for (const f of features) {
+        if (!f.geometry) continue;
+        let coords: [number, number][] = [];
+        if (f.geometry.type === "Point") coords = [f.geometry.coordinates];
+        else if (f.geometry.type === "Polygon") coords = f.geometry.coordinates[0];
+        else if (f.geometry.type === "LineString") coords = f.geometry.coordinates;
+        if (!coords.length) continue;
+        const cLng = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+        const cLat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+        const cp = map.project([cLng, cLat]);
+        const d = Math.hypot(cp.x - pt.x, cp.y - pt.y);
+        if (d < bestDist) { bestDist = d; best = f; }
+      }
+      console.log("🔴 nearest", best?.id ?? "NONE", "dist", bestDist);
+      if (!best) return;
+
+      moveDragRef.current = {
+        feature: best,
+        startLng: lng,
+        startLat: lat,
+        origGeom: JSON.parse(JSON.stringify(best.geometry)),
+      };
+      setSelectedFeature(best);
+    }
+
+    function onMove(e: PointerEvent) {
+      const drag = moveDragRef.current;
+      if (!drag) return;
+      const map = mapRef.current?.getMap?.();
+      if (!map) return;
+      const canvas = map.getCanvas();
+      const rect = canvas.getBoundingClientRect();
+      const ll = map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
+      const dLng = ll.lng - drag.startLng;
+      const dLat = ll.lat - drag.startLat;
+      const g = JSON.parse(JSON.stringify(drag.origGeom));
+      const sc = (c: [number,number][]): [number,number][] => c.map(([x,y]) => [x+dLng, y+dLat]);
+      if (g.type === "Point") g.coordinates = [g.coordinates[0]+dLng, g.coordinates[1]+dLat];
+      else if (g.type === "Polygon") g.coordinates = g.coordinates.map(sc);
+      else if (g.type === "LineString") g.coordinates = sc(g.coordinates);
+      const updated = { ...drag.feature, geometry: g };
+      setEditFeatures(fs => fs.map(f => f.id === drag.feature.id ? updated : f));
+      setSelectedFeature(updated);
+    }
+
+    function onUp(e: PointerEvent) {
+      const drag = moveDragRef.current;
+      if (!drag) return;
+      const map = mapRef.current?.getMap?.();
+      if (!map) return;
+      const canvas = map.getCanvas();
+      const rect = canvas.getBoundingClientRect();
+      const ll = map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
+      const dLng = ll.lng - drag.startLng;
+      const dLat = ll.lat - drag.startLat;
+      const g = JSON.parse(JSON.stringify(drag.origGeom));
+      const sc = (c: [number,number][]): [number,number][] => c.map(([x,y]) => [x+dLng, y+dLat]);
+      if (g.type === "Point") g.coordinates = [g.coordinates[0]+dLng, g.coordinates[1]+dLat];
+      else if (g.type === "Polygon") g.coordinates = g.coordinates.map(sc);
+      else if (g.type === "LineString") g.coordinates = sc(g.coordinates);
+      const updated = { ...drag.feature, geometry: g };
+      const table = g.type === "Polygon" ? "polygons" : g.type === "LineString" ? "lines" : "points";
+      setEditFeatures(fs => fs.map(f => f.id === drag.feature.id ? updated : f));
+      setSelectedFeature(updated);
+      stageChange({ kind: drag.feature.id.startsWith("pending-") ? "add" : "edit", feature: updated, table });
+      moveDragRef.current = null;
+    }
+
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup",   onUp,   true);
+
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup",   onUp,   true);
+      moveDragRef.current = null;
+    };
+  }, [localEditMode]);
+
   // GeoJSON for all datasets — bypasses Martin tiling entirely
   const [polygonGeoJSON, setPolygonGeoJSON] = useState<Record<string, any>>({});
   useEffect(() => {
@@ -864,11 +976,12 @@ export function MapView() {
       const fc   = await res.json();
       const features: GeoFeature[] = (fc.features ?? []).map((f: any) => ({
         ...f,
-        id: String(f.id ?? f.properties?._fid ?? Math.random()),
+        id: String(f.properties?._fid ?? f.id ?? Math.random()),
         properties: { ...f.properties, _sanitized: sanitizeProps(f.properties) },
       }));
       setEditFeatures(features);
-      setLocalEditMode("select");
+      // Only switch to select if we're in "none" — preserve move-feature etc.
+      setLocalEditMode((m) => m === "none" ? "select" : m);
     } catch (e) { console.error("Failed to load features", e); }
   }
 
@@ -1130,6 +1243,20 @@ export function MapView() {
           loadedCount={editFeatures.length}
           onExitEdit={handleExitEdit}
           onLoadFeatures={() => activeDatasetId && loadFeatures(activeDatasetId, activeTable)}
+          onMoveMode={async () => {
+            if (editFeatures.length === 0 && activeDatasetId) {
+              const res = await fetch(`${API}/datasets/${activeDatasetId}/features?table=${activeTable}`);
+              const fc = await res.json();
+              const features: GeoFeature[] = (fc.features ?? []).map((f: any) => ({
+                ...f,
+                id: String(f.properties?._fid ?? f.id ?? Math.random()),
+                properties: { ...f.properties, _sanitized: sanitizeProps(f.properties) },
+              }));
+              editFeaturesRef.current = features;
+              setEditFeatures(features);
+            }
+            setLocalEditMode("move-feature");
+          }}
         />
       )}
 
@@ -1207,7 +1334,7 @@ export function MapView() {
       <DeckGL
         style={{ position: "absolute", inset: 0, cursor: cursorStyle }}
         viewState={deckViewState}
-        controller={{ dragPan: true, scrollZoom: true, doubleClickZoom: false, dragRotate: true }}
+        controller={{ dragPan: localEditMode !== "move-feature", scrollZoom: true, doubleClickZoom: false, dragRotate: localEditMode !== "move-feature" }}
         onViewStateChange={({ viewState: vs, interactionState }: any) => {
           setDeckViewState(vs);
         }}
@@ -1286,10 +1413,15 @@ export function MapView() {
                     return stops;
                   }
                   if (sym.mode === "graduated" && sym.colors?.length) {
-                    return ["interpolate", ["linear"], ["to-number", ["get", sym.col], 0],
-                      0, sym.colors[0],
-                      100, sym.colors[sym.colors.length - 1],
-                    ];
+                    const min = sym.min ?? 0;
+                    const max = sym.max ?? 100;
+                    const colors = sym.colors;
+                    const stops: any[] = ["interpolate", ["linear"], ["to-number", ["get", sym.col], min]];
+                    colors.forEach((c: string, idx: number) => {
+                      const t = colors.length === 1 ? 0 : idx / (colors.length - 1);
+                      stops.push(min + t * (max - min), c);
+                    });
+                    return stops;
                   }
                   return fallback;
                 }
@@ -1322,7 +1454,7 @@ export function MapView() {
                     paint={{
                       "line-color":   colorExpr,
                       "line-opacity": layer.opacity,
-                      "line-width":   ["interpolate", ["linear"], ["zoom"], 0,1, 6,2, 12,3, 16,5],
+                      "line-width":   (layer as any).strokeWidth ?? 2,
                     }}
                   />,
                 ];
@@ -1347,7 +1479,7 @@ export function MapView() {
                     paint={{
                       "line-color":   color,
                       "line-opacity": layer.opacity,
-                      "line-width":   1.5,
+                      "line-width":   (layer as any).strokeWidth ?? 1.5,
                     }}
                   />,
                 ];
@@ -1427,7 +1559,7 @@ export function MapView() {
               const isPend = f.id.startsWith("pending-");
               return (
                 <Marker key={f.id} longitude={lng} latitude={lat}
-                  draggable={localEditMode === "select"}
+                  draggable={localEditMode === "select" || localEditMode === "move-feature"}
                   onDragEnd={(e) => handlePointDragEnd(f, e)}
                   onClick={(e) => { e.originalEvent?.stopPropagation?.(); setSelectedFeature(f); setAttrModalIsNew(false); }}
                 >
@@ -1467,6 +1599,10 @@ export function MapView() {
                     ))
                 );
               })}
+          
+
+          
+          
 
           {/* Midpoint ghost handles — drag to insert a new vertex */}
           {localEditMode === "select" &&

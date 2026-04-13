@@ -107,14 +107,23 @@ function stripUtf8Bom(s: string) {
 }
 
 function pickCsvSuggestions(fields: string[]) {
-  const findMatch = (candidates: string[]) =>
-    fields.find((f) => candidates.includes(f.toLowerCase())) ?? null;
+  const lower = fields.map((f) => f.toLowerCase().trim());
 
-  const latColumn = findMatch(["lat", "latitude", "location_latitude", "y"]);
-  const lngColumn = findMatch(["lng", "lon", "longitude", "location_longitude", "x"]);
+  const latColumn = fields.find((_, i) =>
+    ["lat", "latitude", "y"].includes(lower[i])
+  ) ?? null;
 
-  return { latColumn, lngColumn };
+  const lngColumn = fields.find((_, i) =>
+    ["lng", "lon", "long", "longitude", "x"].includes(lower[i])
+  ) ?? null;
+
+  const wktColumn = fields.find((_, i) =>
+    ["wkt", "geometry", "geom", "shape", "the_geom", "geo"].includes(lower[i])
+  ) ?? null;
+
+  return { latColumn, lngColumn, wktColumn };
 }
+
 
 function normalizeGeoJSONTopLevel(json: any): {
   features: any[];
@@ -461,13 +470,15 @@ app.post("/datasets/inspect", async (c) => {
     const rows = Array.isArray(parsed.data) ? parsed.data.slice(0, 5) : [];
     const suggestions = pickCsvSuggestions(fields);
 
+    const hasWkt = !!suggestions.wktColumn;
     return c.json({
       ok: true,
       fileType: "csv",
       columns: fields,
       sampleRows: rows,
       suggestions,
-      suggestedLayerType: "circle",
+      suggestedLayerType: hasWkt ? "line" : "circle",
+      hasWktColumn: hasWkt,
     });
   }
 
@@ -677,10 +688,63 @@ app.post("/datasets/upload", async (c) => {
     const suggestions = pickCsvSuggestions(fields);
     const latColumn = latColumnInput ?? suggestions.latColumn;
     const lngColumn = lngColumnInput ?? suggestions.lngColumn;
+    const wktColumnInput = typeof body["wktColumn"] === "string" ? body["wktColumn"] : null;
+    const wktColumn = wktColumnInput ?? suggestions.wktColumn;
+
+    // WKT mode — supports points, lines, polygons from a geometry column
+    if (wktColumn) {
+      let inserted = 0;
+      let skipped = 0;
+      const geomTypes = new Set<string>();
+
+      await sql.begin(async (tx) => {
+        for (const r of rows) {
+          const wkt = r[wktColumn];
+          if (!wkt || typeof wkt !== "string") { skipped++; continue; }
+          const props = { ...r, dataset_id: datasetId };
+          try {
+            // Detect type from WKT prefix
+            const upper = wkt.trim().toUpperCase();
+            let table = "points";
+            if (upper.startsWith("LINESTRING") || upper.startsWith("MULTILINESTRING")) {
+              table = "lines";
+              geomTypes.add(upper.startsWith("MULTI") ? "MultiLineString" : "LineString");
+            } else if (upper.startsWith("POLYGON") || upper.startsWith("MULTIPOLYGON")) {
+              table = "polygons";
+              geomTypes.add(upper.startsWith("MULTI") ? "MultiPolygon" : "Polygon");
+            } else {
+              geomTypes.add(upper.startsWith("MULTI") ? "MultiPoint" : "Point");
+            }
+            await tx.unsafe(
+              `INSERT INTO ${table} (dataset_id, geom, props)
+               VALUES ($1, ST_SetSRID(ST_GeomFromText($2), 4326), $3::jsonb)`,
+              [datasetId, wkt, JSON.stringify(props)]
+            );
+            inserted++;
+          } catch { skipped++; }
+        }
+      });
+
+      if (inserted === 0) {
+        return c.json(badRequest("NO_VALID_WKT", "No valid WKT geometries found."), 400);
+      }
+
+      const geometryTypes = [...geomTypes];
+      const suggestedLayerType = inferSuggestedLayerTypeFromGeomTypes(geometryTypes);
+      const renderType = inferDatasetRenderType(geometryTypes);
+      const bounds = await getDatasetBounds(datasetId);
+      await registerDataset(datasetId, file.name, renderType);
+      return c.json({
+        ok: true, datasetId, inserted, bounds, geometryTypes,
+        suggestedLayerType, renderType,
+        tiles: { points: `${MARTIN_BASE}/points/{z}/{x}/{y}`, lines: `${MARTIN_BASE}/lines/{z}/{x}/{y}`, polygons: `${MARTIN_BASE}/polygons/{z}/{x}/{y}` },
+        processingMs: Date.now() - startedAt,
+      });
+    }
 
     if (!latColumn || !lngColumn) {
       return c.json(
-        badRequest("CSV_COLUMNS_REQUIRED", "Latitude/Longitude columns not found"),
+        badRequest("CSV_COLUMNS_REQUIRED", "Latitude/Longitude columns not found. For line/polygon data, use a GeoJSON file or a CSV with a WKT geometry column named 'wkt', 'geometry', or 'geom'."),
         400
       );
     }
@@ -1172,7 +1236,7 @@ app.post("/datasets/:datasetId/features", async (c) => {
 
   const [row] = await sql.unsafe(
     `INSERT INTO ${targetTable} (dataset_id, geom, props)
-     VALUES ($1::uuid, ST_Buffer(ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), 0), to_json($3::text)::jsonb)
+     VALUES ($1::uuid, ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), to_json($3::text)::jsonb)
      RETURNING id::text`,
     [datasetId, JSON.stringify(geometry), sql.json({ ...(properties ?? {}), dataset_id: datasetId })]
   );
@@ -1220,14 +1284,14 @@ app.patch("/features/:table/:featureId", async (c) => {
   if (geometry && properties) {
     await sql.unsafe(
       `UPDATE ${table}
-       SET geom  = ST_Buffer(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326), 0),
+       SET geom  = ST_SetSRID(ST_GeomFromGeoJSON($1), 4326),
            props = to_json($2::text)::jsonb
        WHERE id = $3::uuid`,
       [JSON.stringify(geometry), JSON.stringify(properties), featureId]
     );
   } else if (geometry) {
     await sql.unsafe(
-      `UPDATE ${table} SET geom = ST_Buffer(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326), 0) WHERE id = $2::uuid`,
+      `UPDATE ${table} SET geom = ST_SetSRID(ST_GeomFromGeoJSON($1), 4326) WHERE id = $2::uuid`,
       [JSON.stringify(geometry), featureId]
     );
   } else if (properties) {

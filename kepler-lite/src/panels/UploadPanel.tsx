@@ -25,6 +25,8 @@ export function UploadPanel() {
   const [columns, setColumns] = useState<string[]>([]);
   const [selectedLat, setSelectedLat] = useState("");
   const [selectedLng, setSelectedLng] = useState("");
+  const [selectedWkt, setSelectedWkt] = useState("");
+  const [hasWkt, setHasWkt] = useState(false);
   const [suggestedLayerType, setSuggestedLayerType] = useState<LayerType>("fill");
   const [renderType, setRenderType] = useState<RenderType | undefined>(undefined);
   const [inspecting, setInspecting] = useState(false);
@@ -35,7 +37,7 @@ export function UploadPanel() {
 
   const canUpload = useMemo(() => {
     if (!file || uploading || inspecting) return false;
-    if (fileType === "csv") return Boolean(selectedLat && selectedLng);
+    if (fileType === "csv") return hasWkt ? true : Boolean(selectedLat && selectedLng);
     return true;
   }, [file, fileType, selectedLat, selectedLng, uploading, inspecting]);
 
@@ -67,8 +69,10 @@ export function UploadPanel() {
         setColumns(result.columns ?? []);
         setSelectedLat(result.suggestions?.latColumn ?? "");
         setSelectedLng(result.suggestions?.lngColumn ?? "");
-        setSuggestedLayerType("circle");
-        setRenderType("point");
+        setSelectedWkt(result.suggestions?.wktColumn ?? "");
+        setHasWkt(!!result.hasWktColumn);
+        setSuggestedLayerType(result.hasWktColumn ? "line" : "circle");
+        setRenderType(result.hasWktColumn ? "line" : "point");
         setInfo(`CSV detected with ${result.columns.length} column(s).`);
       } else {
         setFileType("geojson");
@@ -144,8 +148,9 @@ export function UploadPanel() {
     try {
       const result = await uploadDataset({
         file,
-        latColumn: fileType === "csv" ? selectedLat : undefined,
-        lngColumn: fileType === "csv" ? selectedLng : undefined,
+        latColumn: fileType === "csv" && !hasWkt ? selectedLat : undefined,
+        lngColumn: fileType === "csv" && !hasWkt ? selectedLng : undefined,
+        wktColumn: fileType === "csv" && hasWkt ? selectedWkt : undefined,
         onProgress: (pct) => setProgress(pct),
       });
 
@@ -220,20 +225,31 @@ export function UploadPanel() {
 
       {fileType === "csv" && columns.length > 0 && (
         <div style={{ display: "grid", gap: 10 }}>
-          <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
-            <span>Latitude column</span>
-            <select value={selectedLat} onChange={(e) => setSelectedLat(e.target.value)}>
-              <option value="">Select latitude column</option>
-              {columns.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </label>
-          <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
-            <span>Longitude column</span>
-            <select value={selectedLng} onChange={(e) => setSelectedLng(e.target.value)}>
-              <option value="">Select longitude column</option>
-              {columns.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </label>
+          {hasWkt ? (
+            <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
+              <span>WKT geometry column</span>
+              <select value={selectedWkt} onChange={(e) => setSelectedWkt(e.target.value)}>
+                {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          ) : (
+            <>
+              <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
+                <span>Latitude column</span>
+                <select value={selectedLat} onChange={(e) => setSelectedLat(e.target.value)}>
+                  <option value="">Select latitude column</option>
+                  {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+              <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
+                <span>Longitude column</span>
+                <select value={selectedLng} onChange={(e) => setSelectedLng(e.target.value)}>
+                  <option value="">Select longitude column</option>
+                  {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            </>
+          )}
         </div>
       )}
 
