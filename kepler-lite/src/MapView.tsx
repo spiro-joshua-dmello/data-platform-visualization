@@ -272,6 +272,8 @@ function AttributeModal({
         )}
       </div>
 
+      
+
       {/* Sticky footer */}
       <div style={{
         padding: "12px 20px",
@@ -605,6 +607,7 @@ export function MapView() {
     datasets, layers, viewState, setViewState,
     activeDatasetId, setActiveDatasetId,
     zoomTarget, filterRules,
+    setMapContextMenu,
   } = useAppStore();
   
   // Controlled view state — DeckGL reads this every render
@@ -1234,7 +1237,17 @@ export function MapView() {
   const { measurePoints, measureMode } = useAppStore();
   
   return (
-    <>
+    <div                                          
+      style={{ position: "absolute", inset: 0 }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        const map = mapRef.current?.getMap?.();
+        if (!map) return;
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const lngLat = map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
+        setMapContextMenu({ x: e.clientX, y: e.clientY, lat: lngLat.lat, lng: lngLat.lng });
+      }}
+    >
       {activeDatasetId !== null && activeDataset !== null && (
         <EditToolbar
           editMode={localEditMode}
@@ -1663,6 +1676,6 @@ export function MapView() {
             )}
         </Map>
       </DeckGL>
-    </>
+    </div>
   );
 }

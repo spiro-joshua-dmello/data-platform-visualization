@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { useAppStore, type Annotation, type ActiveTool } from "./store";
 import { UploadPanel } from "./panels/UploadPanel";
+import { createPortal } from "react-dom";
 
 const API = "http://localhost:8787";
 
@@ -75,6 +76,304 @@ function LayerSwatch({ type, color, size = 16 }: { type: string; color: string; 
     <svg width={size} height={size} viewBox="0 0 16 16" style={{ flexShrink: 0 }}>
       <rect x="2" y="2" width="12" height="12" rx="2" fill={color} fillOpacity="0.65" stroke={color} strokeWidth="1.5"/>
     </svg>
+  );
+}
+
+// ─── Layer Legend (symbology summary in layer list) ───────────────────────────
+function LayerLegend({ layer, ds }: { layer: any; ds: any }) {
+  const sym = layer.symbology;
+  const hex = rgbToHex(layer.color);
+
+  if (!sym || sym.mode === "single") {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5, paddingLeft: 28 }}>
+        <LayerSwatch type={layer.type} color={hex} size={11} />
+        <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>Single symbol</span>
+      </div>
+    );
+  }
+
+  if (sym.mode === "categorized" && sym.values?.length) {
+    const items: string[] = sym.values.slice(0, 5);
+    const more = sym.values.length - 5;
+    return (
+      <div style={{ marginTop: 5, paddingLeft: 28, display: "flex", flexDirection: "column", gap: 3 }}>
+        {items.map((val: string, i: number) => (
+          <div key={val} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <LayerSwatch type={layer.type} color={sym.colors[i % sym.colors.length]} size={11} />
+            <span style={{
+              fontSize: 11, color: T.textMuted, fontFamily: T.font,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160,
+            }}>
+              {val || "(blank)"}
+            </span>
+          </div>
+        ))}
+        {more > 0 && (
+          <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.font, marginLeft: 17 }}>
+            +{more} more
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  if (sym.mode === "graduated" && sym.colors?.length) {
+    return (
+      <div style={{ marginTop: 5, paddingLeft: 28 }}>
+        <div style={{
+          height: 8, borderRadius: 4, width: "80%", maxWidth: 160,
+          background: `linear-gradient(to right, ${sym.colors.join(", ")})`,
+        }} />
+        <div style={{ display: "flex", justifyContent: "space-between", maxWidth: 160, marginTop: 2 }}>
+          <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.font }}>{sym.min ?? 0}</span>
+          <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.font }}>{sym.max ?? 100}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ─── Layer Context Menu ───────────────────────────────────────────────────────
+function LayerContextMenu({
+  x, y, layer, ds, editMode,
+  onClose, onZoom, onStyle, onAttrTable, onDelete,
+}: {
+  x: number; y: number; layer: any; ds: any; editMode: boolean;
+  onClose: () => void; onZoom: () => void; onStyle: () => void;
+  onAttrTable: () => void; onDelete: () => void;
+}) {
+  useEffect(() => {
+    const close = () => onClose();
+    const id = setTimeout(() => {
+      window.addEventListener("click", close);
+      window.addEventListener("contextmenu", close);
+    }, 10);
+    return () => {
+      clearTimeout(id);
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+    };
+  }, [onClose]);
+
+  async function handleExport() {
+    if (!ds) return;
+    const table = ds.renderType === "point" ? "points" : ds.renderType === "line" ? "lines" : "polygons";
+    try {
+      const res = await fetch(`${API}/datasets/${ds.datasetId}/features?table=${table}`);
+      const fc = await res.json();
+      const blob = new Blob([JSON.stringify(fc, null, 2)], { type: "application/geo+json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `${ds.name.replace(/\.[^.]+$/, "")}.geojson`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { console.error("Export failed:", e); }
+    onClose();
+  }
+
+  type MenuItem = { label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean };
+
+  const items: MenuItem[] = [
+    {
+      label: "Zoom to layer",
+      icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/><path d="M7 5v4M5 7h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+      onClick: () => { onZoom(); onClose(); },
+    },
+    {
+      label: "Style layer",
+      icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="3" rx="1" fill="currentColor" opacity="0.9"/><rect x="2" y="6.5" width="12" height="3" rx="1" fill="currentColor" opacity="0.6"/><rect x="2" y="11" width="12" height="3" rx="1" fill="currentColor" opacity="0.3"/></svg>,
+      onClick: () => { onStyle(); onClose(); },
+    },
+    {
+      label: "Attribute table",
+      icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="3" width="13" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5"/><path d="M1.5 7h13M5.5 7v6" stroke="currentColor" strokeWidth="1.5"/></svg>,
+      onClick: () => { onAttrTable(); onClose(); },
+    },
+    ...(!editMode ? [{
+      label: "Export as GeoJSON",
+      icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 11v2h10v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
+      onClick: handleExport,
+    }] : []),
+    {
+      label: "Delete layer",
+      icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4M6 7v5M10 7v5M3 4l1 9.5A.5.5 0 0 0 4.5 14h7a.5.5 0 0 0 .5-.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+      onClick: () => { onDelete(); onClose(); },
+      danger: true,
+    },
+  ];
+
+  return createPortal(
+    <div
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+      style={{
+        position: "fixed",
+        top: y,
+        left: Math.max(8, Math.min(x, window.innerWidth - 195)),
+        zIndex: 9999,
+        background: "rgba(255,255,255,0.97)", backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)", borderRadius: 10,
+        border: "1px solid rgba(0,0,0,0.08)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.14)", minWidth: 185, overflow: "hidden",
+        fontFamily: T.font,
+      }}
+    >
+      <div style={{
+        padding: "6px 12px", borderBottom: "1px solid rgba(0,0,0,0.06)",
+        fontSize: 11, fontWeight: 600, color: T.textLight,
+        textTransform: "uppercase", letterSpacing: "0.04em",
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+      }}>
+        {layer.name}
+      </div>
+      {items.map((item) => (
+        <button key={item.label} onClick={item.onClick}
+          style={{
+            display: "flex", alignItems: "center", gap: 9,
+            width: "100%", padding: "8px 12px",
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 13, fontFamily: T.font, textAlign: "left",
+            color: item.danger ? T.red : T.text,
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = item.danger ? "rgba(239,68,68,0.06)" : T.hover; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "none"; }}
+        >
+          <span style={{ color: item.danger ? T.red : T.textMuted, lineHeight: 0 }}>{item.icon}</span>
+          {item.label}
+        </button>
+      ))}
+    </div>,
+    document.body
+  );
+}
+
+// ─── Map Context Menu ─────────────────────────────────────────────────────────
+function MapContextMenu({
+  x, y, lat, lng, onClose, onAddAnnotation,
+}: {
+  x: number; y: number; lat: number; lng: number;
+  onClose: () => void;
+  onAddAnnotation: (lat: number, lng: number, label?: string) => void; 
+}) {
+  useEffect(() => {
+    const close = () => onClose();
+    const id = setTimeout(() => {
+      window.addEventListener("click", close);
+      window.addEventListener("contextmenu", close);
+    }, 50);
+    return () => {
+      clearTimeout(id);
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+    };
+  }, [onClose]);
+
+  const coordStr = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+
+  async function handlePaste() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) {
+        onAddAnnotation(lat, lng, text.trim());
+      }
+    } catch {
+      console.warn("Clipboard read denied");
+    }
+    onClose();
+  }
+
+  type Section = { label: string; icon: React.ReactNode; onClick: () => void; meta?: string }[];
+
+  const sections: Section[] = [
+    [
+      {
+        label: coordStr,
+        icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="7" r="5" stroke="currentColor" strokeWidth="1.4"/><path d="M8 4v3l2 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
+        onClick: () => { navigator.clipboard.writeText(coordStr).catch(() => {}); onClose(); },
+        meta: "Copy",
+      },
+    ],
+    [
+      {
+        label: "Add comment / annotation",
+        icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.8 2 4 3.8 4 6c0 3 4 8 4 8s4-5 4-8c0-2.2-1.8-4-4-4z" fill="#f97316"/><circle cx="8" cy="6" r="1.5" fill="white"/></svg>,
+        onClick: () => { onAddAnnotation(lat, lng); onClose(); },
+      },
+      {
+        label: "Paste here",
+        icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="4" y="2" width="8" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M6 2v2h4V2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+        onClick: handlePaste,
+        meta: "⌘V",
+      },
+    ],
+    [
+      {
+        label: "Open in Google Maps",
+        icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 1.5C5.5 1.5 3.5 3.5 3.5 6c0 3.7 4.5 8.5 4.5 8.5S12.5 9.7 12.5 6c0-2.5-2-4.5-4.5-4.5z" stroke="#4285f4" strokeWidth="1.3" fill="#4285f415"/><circle cx="8" cy="6" r="1.8" fill="#4285f4"/></svg>,
+        onClick: () => { window.open(`https://www.google.com/maps?q=${lat},${lng}`, "_blank"); onClose(); },
+      },
+      {
+        label: "Google Street View",
+        icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5" r="2.5" stroke="#0f9d58" strokeWidth="1.3" fill="#0f9d5815"/><path d="M4 14c0-3 1.8-5 4-5s4 2 4 5" stroke="#0f9d58" strokeWidth="1.3" strokeLinecap="round"/></svg>,
+        onClick: () => { window.open(`https://www.google.com/maps?layer=c&cbll=${lat},${lng}`, "_blank"); onClose(); },
+      },
+      {
+        label: "OpenStreetMap",
+        icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" stroke="#7ebc6f" strokeWidth="1.3" fill="#7ebc6f15"/><path d="M5 11l2-6 2 4 1-2 2 4" stroke="#7ebc6f" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+        onClick: () => { window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}`, "_blank"); onClose(); },
+      },
+    ],
+  ];
+
+  // Clamp so menu doesn't overflow viewport
+  const menuW = 230, menuH = 220;
+  const cx = Math.min(x, window.innerWidth - menuW - 8);
+  const cy = y + menuH > window.innerHeight - 8
+    ? y - menuH          // ← flip upward if it would overflow bottom
+    : y;
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+      style={{
+        position: "fixed", top: cy, left: cx, zIndex: 9999,
+        background: "rgba(255,255,255,0.97)", backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)", borderRadius: 12,
+        border: "1px solid rgba(0,0,0,0.08)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08)",
+        minWidth: menuW, overflow: "hidden", fontFamily: T.font,
+      }}
+    >
+      {sections.map((group, gi) => (
+        <React.Fragment key={gi}>
+          {gi > 0 && <div style={{ height: 1, background: "rgba(0,0,0,0.06)" }} />}
+          {group.map((item) => (
+            <button key={item.label} onClick={item.onClick}
+              style={{
+                display: "flex", alignItems: "center", gap: 9,
+                width: "100%", padding: "8px 14px",
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: gi === 0 ? 11 : 13, fontFamily: T.font, textAlign: "left",
+                color: gi === 0 ? T.textMuted : T.text,
+                fontVariantNumeric: "tabular-nums",
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = T.hover; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "none"; }}
+            >
+              <span style={{ lineHeight: 0, flexShrink: 0 }}>{item.icon}</span>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {item.label}
+              </span>
+              {item.meta && (
+                <span style={{ fontSize: 10, color: T.textLight, flexShrink: 0 }}>{item.meta}</span>
+              )}
+            </button>
+          ))}
+        </React.Fragment>
+      ))}
+    </div>
   );
 }
 
@@ -413,6 +712,7 @@ function LegendPanel({ onStyleLayer, onShowAttrTable, editMode }: {
 function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, onStyleLayer, onShowAttrTable, editMode, setZoomTarget }: any) {
   const [hovId, setHovId] = useState<string|null>(null);
   const [deleting, setDeleting] = useState<string|null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ layerId: string; x: number; y: number } | null>(null);
 
   if (layers.length === 0) return (
     <div style={{ padding: "32px 16px", textAlign: "center", color: T.textLight, fontSize: 13, fontFamily: T.font }}>
@@ -427,36 +727,69 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
     try {
       const res = await fetch(`${API}/datasets/${datasetId}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      console.error("Delete failed:", e);
-    } finally {
-      removeLayer(layer.id);
-      removeDataset(datasetId);
-      setDeleting(null);
-    }
+    } catch (e) { console.error("Delete failed:", e); }
+    finally { removeLayer(layer.id); removeDataset(datasetId); setDeleting(null); }
   }
+
+  function handleZoom(layer: any, ds: any) {
+    if (!ds?.bounds) return;
+    const [minLng, minLat, maxLng, maxLat] = ds.bounds;
+    const lng = (minLng + maxLng) / 2, lat = (minLat + maxLat) / 2;
+    const diff = Math.max(Math.abs(maxLng - minLng), Math.abs(maxLat - minLat), 0.001);
+    const zoom = diff > 60 ? 2 : diff > 30 ? 3 : diff > 15 ? 4 : diff > 8 ? 5 : diff > 4 ? 6 : diff > 2 ? 7 : diff > 1 ? 8 : diff > 0.5 ? 9 : diff > 0.25 ? 10 : diff > 0.12 ? 11 : diff > 0.06 ? 12 : diff > 0.03 ? 13 : 14;
+    setZoomTarget({ longitude: lng, latitude: lat, zoom });
+  }
+
+  const ctxLayer = ctxMenu ? layers.find((l: any) => l.id === ctxMenu.layerId) : null;
+  const ctxDs = ctxLayer ? datasets.find((d: any) => d.id === ctxLayer.datasetId) : null;
 
   return (
     <div style={{ padding: "6px 0" }}>
+      {ctxMenu && ctxLayer && (
+        <LayerContextMenu
+          x={ctxMenu.x} y={ctxMenu.y}
+          layer={ctxLayer} ds={ctxDs} editMode={editMode}
+          onClose={() => setCtxMenu(null)}
+          onZoom={() => handleZoom(ctxLayer, ctxDs)}
+          onStyle={() => onStyleLayer(ctxLayer.id)}
+          onAttrTable={() => onShowAttrTable(ctxLayer.id)}
+          onDelete={() => handleDelete(ctxLayer)}
+        />
+      )}
+
       {layers.map((layer: any) => {
         const ds = datasets.find((d: any) => d.id === layer.datasetId);
         const hex = rgbToHex(layer.color);
         const isHov = hovId === layer.id;
         const isDeleting = deleting === layer.id;
+
         return (
           <div key={layer.id}
             onMouseEnter={() => setHovId(layer.id)}
             onMouseLeave={() => setHovId(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              const menuHeight = 36 + (editMode ? 4 : 5) * 37;
+              const y = e.clientY + menuHeight > window.innerHeight - 8
+                ? e.clientY - menuHeight   // flip up
+                : e.clientY;               // open down
+              setCtxMenu({ layerId: layer.id, x: e.clientX, y });
+            }}
             style={{
-              padding: "8px 14px",
+              padding: "8px 14px 10px",
               background: isHov ? T.hover : "transparent",
               transition: "background 0.1s",
               opacity: isDeleting ? 0.4 : 1,
-            }}>
+              borderBottom: `1px solid ${T.border}`,
+            }}
+          >
+            {/* Row: eye toggle + name + ⋯ button */}
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <button onClick={() => updateLayer(layer.id, { visible: !layer.visible })}
+              <button
+                onClick={() => updateLayer(layer.id, { visible: !layer.visible })}
                 style={{ background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 0, flexShrink: 0 }}
-                title={layer.visible ? "Hide layer" : "Show layer"}>
+                title={layer.visible ? "Hide layer" : "Show layer"}
+              >
                 {layer.visible ? (
                   <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
                     <ellipse cx="8" cy="8" rx="6" ry="4" stroke={hex} strokeWidth="1.5"/>
@@ -469,87 +802,45 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
                   </svg>
                 )}
               </button>
+
               <span style={{
-                fontSize: 13, fontWeight: 500, flex: 1, overflow: "hidden",
-                textOverflow: "ellipsis", whiteSpace: "nowrap",
+                fontSize: 13, fontWeight: 500, flex: 1,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 color: layer.visible ? T.text : T.textLight, fontFamily: T.font,
-              }} title={layer.name}>{layer.name}</span>
-              <div style={{ display: "flex", gap: 1, opacity: isHov ? 1 : 0, transition: "opacity 0.15s" }}>
-                {/* Zoom to layer */}
-                <IconBtn onClick={() => {
-                  if (ds?.bounds) {
-                    const [minLng, minLat, maxLng, maxLat] = ds.bounds;
-                    const lng = (minLng + maxLng) / 2;
-                    const lat = (minLat + maxLat) / 2;
-                    const diff = Math.max(Math.abs(maxLng - minLng), Math.abs(maxLat - minLat), 0.001);
-                    const zoom = diff > 60 ? 2 : diff > 30 ? 3 : diff > 15 ? 4 : diff > 8 ? 5 : diff > 4 ? 6 : diff > 2 ? 7 : diff > 1 ? 8 : diff > 0.5 ? 9 : diff > 0.25 ? 10 : diff > 0.12 ? 11 : diff > 0.06 ? 12 : diff > 0.03 ? 13 : 14;
-                    setZoomTarget({ longitude: lng, latitude: lat, zoom });
-                  }
-                }} title="Zoom to layer">
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                    <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5"/>
-                    <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-                    <path d="M7 5v4M5 7h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-                  </svg>
-                </IconBtn>
-                {/* Style */}
-                <IconBtn onClick={() => onStyleLayer(layer.id)} title="Style layer">
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                    <rect x="2" y="2" width="12" height="3" rx="1" fill="currentColor" opacity="0.9"/>
-                    <rect x="2" y="6.5" width="12" height="3" rx="1" fill="currentColor" opacity="0.6"/>
-                    <rect x="2" y="11" width="12" height="3" rx="1" fill="currentColor" opacity="0.3"/>
-                  </svg>
-                </IconBtn>
-                {/* Attribute table */}
-                <IconBtn onClick={() => onShowAttrTable(layer.id)} title="Attribute table">
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                    <rect x="1.5" y="3" width="13" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-                    <path d="M1.5 7h13M5.5 7v6" stroke="currentColor" strokeWidth="1.5"/>
-                  </svg>
-                </IconBtn>
-                {/* Export */}
-                {!editMode && (
-                  <IconBtn onClick={async () => {
-                    const ds = datasets.find((d: any) => d.id === layer.datasetId);
-                    if (!ds) return;
-                    const table = ds.renderType === "point" ? "points" : ds.renderType === "line" ? "lines" : "polygons";
-                    try {
-                      const res = await fetch(`${API}/datasets/${ds.datasetId}/features?table=${table}`);
-                      const fc = await res.json();
-                      const blob = new Blob([JSON.stringify(fc, null, 2)], { type: "application/geo+json" });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = `${ds.name.replace(/\.[^.]+$/, "")}.geojson`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    } catch (e) {
-                      console.error("Export failed:", e);
-                    }
-                  }} title="Export as GeoJSON">
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                      <path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M3 11v2h10v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                    </svg>
-                  </IconBtn>
-                )}
-                {/* Delete — always visible, calls backend */}
-                <IconBtn
-                  onClick={() => { if (!isDeleting) void handleDelete(layer); }}
-                  title="Delete layer"
-                  danger
-                >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                    <path d="M2 4h12M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4M6 7v5M10 7v5M3 4l1 9.5A.5.5 0 0 0 4.5 14h7a.5.5 0 0 0 .5-.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </IconBtn>
-              </div>
+              }} title={layer.name}>
+                {layer.name}
+              </span>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const menuHeight = 36 + (editMode ? 4 : 5) * 37;
+                  setCtxMenu({
+                    layerId: layer.id,
+                    x: rect.right + 4,
+                    y: rect.bottom - menuHeight,  // bottom of menu aligns with button
+                  });
+                }}
+                style={{
+                  opacity: isHov ? 1 : 0,
+                  transition: "opacity 0.15s",
+                  background: "none", border: "none", cursor: "pointer",
+                  padding: 4, borderRadius: 6, color: "#6b7280", flexShrink: 0,
+                  display: "flex", alignItems: "center",
+                }}
+                title="Layer options"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <circle cx="3" cy="8" r="1.5" fill="currentColor"/>
+                  <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+                  <circle cx="13" cy="8" r="1.5" fill="currentColor"/>
+                </svg>
+              </button>
             </div>
-            {ds && (
-              <div style={{ marginLeft: 28, marginTop: 2, fontSize: 11, color: T.textLight, fontFamily: T.font }}>
-                {ds.renderType ?? layer.type} · {ds.name}
-              </div>
-            )}
+
+            {/* Symbology legend */}
+            <LayerLegend layer={layer} ds={ds} />
           </div>
         );
       })}
@@ -559,7 +850,7 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
 
 // ─── Notes Tab ────────────────────────────────────────────────────────────────
 function NotesTab() {
-  const { annotations, mapPins, addAnnotation, updateAnnotation, removeAnnotation, removeMapPin } = useAppStore();
+  const { annotations, mapPins, addAnnotation, updateAnnotation, removeAnnotation, removeMapPin, updateMapPin } = useAppStore();
   const [text, setText] = useState("");
   const [color, setColor] = useState(ANNO_COLORS[0]);
   const [editId, setEditId] = useState<string|null>(null);
@@ -703,18 +994,51 @@ function NotesTab() {
                   <circle cx="8" cy="6" r="1.5" fill="white"/>
                 </svg>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: T.text, fontFamily: T.font, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {pin.label || <span style={{ color: T.textLight, fontStyle: "italic" }}>Unlabelled pin</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: T.textLight, fontFamily: T.font }}>
+                  {editId === pin.id ? (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        autoFocus
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { updateMapPin(pin.id, { label: editText }); setEditId(null); }
+                          if (e.key === "Escape") setEditId(null);
+                        }}
+                        style={{
+                          flex: 1, fontSize: 13, fontFamily: T.font,
+                          border: `1.5px solid ${T.accent}`, borderRadius: 6,
+                          padding: "3px 8px", outline: "none", color: T.text,
+                        }}
+                      />
+                      <button onClick={() => { updateMapPin(pin.id, { label: editText }); setEditId(null); }}
+                        style={{ background: T.accent, border: "none", borderRadius: 5, color: "white", fontSize: 11, fontWeight: 700, padding: "3px 8px", cursor: "pointer" }}>✓</button>
+                      <button onClick={() => setEditId(null)}
+                        style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", fontSize: 13 }}>✕</button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => { setEditId(pin.id); setEditText(pin.label); }}
+                      style={{ fontSize: 13, color: pin.label ? T.text : T.textLight, fontFamily: T.font, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "text", fontStyle: pin.label ? "normal" : "italic" }}>
+                      {pin.label || "Click to add label…"}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: T.textLight, fontFamily: T.font, marginTop: 2 }}>
                     {pin.lat.toFixed(4)}, {pin.lng.toFixed(4)}
                   </div>
                 </div>
-                <div style={{ opacity: hovId === pin.id ? 1 : 0, transition: "opacity 0.15s" }}>
-                  <IconBtn onClick={() => removeMapPin(pin.id)} title="Remove pin" danger>
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-                  </IconBtn>
-                </div>
+                <button
+                  onClick={() => removeMapPin(pin.id)}
+                  style={{
+                    opacity: hovId === pin.id ? 1 : 0, transition: "opacity 0.15s",
+                    background: "rgba(239,68,68,0.1)", border: "none", cursor: "pointer",
+                    borderRadius: 6, padding: 6, display: "flex", alignItems: "center",
+                    color: T.red, flexShrink: 0,
+                  }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                    <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                </button>
               </div>
             ))
           )}
@@ -1692,9 +2016,11 @@ function EditModePanel() {
 
 // ─── Root FeltUI overlay ──────────────────────────────────────────────────────
 export function FeltUI() {
-  const { viewState, activeDatasetId, datasets } = useAppStore();
+  const { viewState, activeDatasetId, datasets, addMapPin, setActiveTool,mapPins, mapContextMenu, setMapContextMenu } = useAppStore();
   const [styleLayerId, setStyleLayerId] = useState<string|null>(null);
   const [attrLayerId, setAttrLayerId]   = useState<string|null>(null);
+
+
 
   const handleStyle = useCallback((id: string) => setStyleLayerId((p) => p === id ? null : id), []);
   const handleAttr  = useCallback((id: string) => setAttrLayerId((p) => p === id ? null : id), []);
@@ -1747,7 +2073,26 @@ export function FeltUI() {
           <span style={{ opacity: 0.75, fontWeight: 400, fontSize: 11 }}>· Load → add / click to select → edit attrs or delete</span>
         </div>
       )}
-
+      
+      {/* ↓ ADD THIS BLOCK before the closing </> */}
+      {mapContextMenu && (
+        <MapContextMenu
+          x={mapContextMenu.x} y={mapContextMenu.y}
+          lat={mapContextMenu.lat} lng={mapContextMenu.lng}
+          onClose={() => setMapContextMenu(null)}
+          onAddAnnotation={(lat, lng, label) => {
+            const colors = ["#f97316","#3b82f6","#22c55e","#a855f7","#ef4444","#eab308"];
+            addMapPin({ 
+              id: "pin-" + Date.now(), 
+              lat, 
+              lng, 
+              label: label ?? "",
+              color: colors[mapPins.length % colors.length], 
+              createdAt: Date.now() 
+            });
+          }}
+        />
+      )}
       <style>{`@keyframes felt-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }`}</style>
     </>
   );

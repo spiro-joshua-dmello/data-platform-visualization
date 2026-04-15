@@ -51,12 +51,26 @@ function PinMarker({ pin, onRemove, onLabelChange, onMove }: {
   onLabelChange: (label: string) => void;
   onMove?: (lng: number, lat: number) => void;
 }) {
-  const [editing, setEditing] = useState(!pin.label);
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(pin.label);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (editing) setTimeout(() => inputRef.current?.focus(), 50); }, [editing]);
+  // Add this useEffect inside PinMarker:
+  useEffect(() => {
+    if (!editing) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (inputRef.current && !inputRef.current.contains(e.target as Node)) {
+        onLabelChange(draft);
+        setEditing(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [editing, draft]);
   // Sync draft when store label changes (e.g. after save reflects back)
-  useEffect(() => { if (!editing) setDraft(pin.label); }, [pin.label, editing]);
+  useEffect(() => {
+    if (!pin.label) setEditing(true);
+  }, []);
 
   return (
     <Marker
@@ -72,7 +86,10 @@ function PinMarker({ pin, onRemove, onLabelChange, onMove }: {
           flexDirection: "column",
           alignItems: "center",
           cursor: "default",
+          pointerEvents: "all", 
         }}
+        onMouseDown={(e) => e.stopPropagation()}  
+        onClick={(e) => e.stopPropagation()}  
       >
         {editing ? (
           <div
@@ -92,12 +109,12 @@ function PinMarker({ pin, onRemove, onLabelChange, onMove }: {
               onKeyDown={(e) => { if (e.key === "Enter") { onLabelChange(draft); setEditing(false); } if (e.key === "Escape") setEditing(false); }}
               placeholder="Add label…" style={{ border: "none", outline: "none", fontSize: 12, fontFamily: "'Inter', system-ui, sans-serif", width: 120, color: "#111827" }} />
             <button
-              onMouseDown={(e) => { e.preventDefault(); onLabelChange(draft); setEditing(false); }}
+              onClick={() => { onLabelChange(draft); setEditing(false); }}
               style={{ background: pin.color, border: "none", borderRadius: 5, color: "white", fontSize: 10, fontWeight: 700, padding: "2px 7px", cursor: "pointer" }}>✓</button>
           </div>
         ) : pin.label ? (
           <div
-            onClick={() => setEditing(true)}
+            onMouseDown={(e) => { e.stopPropagation(); setEditing(true); }}
             style={{
               background: "white",
               borderRadius: 8,
@@ -120,7 +137,7 @@ function PinMarker({ pin, onRemove, onLabelChange, onMove }: {
           </div>
         ) : (
           <div
-            onClick={() => setEditing(true)}
+            onMouseDown={(e) => { e.stopPropagation(); setEditing(true); }}
             style={{
               background: "rgba(255,255,255,0.9)",
               borderRadius: 8,

@@ -36,6 +36,8 @@ type AppState = {
   annotations: Annotation[];
   mapPins: MapPin[];
   activeTool: ActiveTool;
+  mapContextMenu: { x: number; y: number; lat: number; lng: number } | null;
+  setMapContextMenu: (m: { x: number; y: number; lat: number; lng: number } | null) => void;
 
   zoomTarget: ZoomTarget | null;
   setZoomTarget: (target: { longitude: number; latitude: number; zoom: number }) => void;
@@ -86,7 +88,8 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   annotations: [],
   mapPins: [],
   activeTool: "pointer",
-
+  mapContextMenu: null,
+  setMapContextMenu: (m) => set({ mapContextMenu: m }),
   viewState: {
     longitude: 77.5946,
     latitude: 12.9716,
