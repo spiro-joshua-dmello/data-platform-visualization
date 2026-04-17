@@ -27,6 +27,8 @@ export function UploadPanel() {
   const [selectedLng, setSelectedLng] = useState("");
   const [selectedWkt, setSelectedWkt] = useState("");
   const [hasWkt, setHasWkt] = useState(false);
+  const [selectedH3, setSelectedH3] = useState("");
+  const [hasH3, setHasH3] = useState(false);
   const [suggestedLayerType, setSuggestedLayerType] = useState<LayerType>("fill");
   const [renderType, setRenderType] = useState<RenderType | undefined>(undefined);
   const [inspecting, setInspecting] = useState(false);
@@ -34,12 +36,11 @@ export function UploadPanel() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
-
   const canUpload = useMemo(() => {
     if (!file || uploading || inspecting) return false;
-    if (fileType === "csv") return hasWkt ? true : Boolean(selectedLat && selectedLng);
+    if (fileType === "csv") return hasH3 ? Boolean(selectedH3) : hasWkt ? true : Boolean(selectedLat && selectedLng);
     return true;
-  }, [file, fileType, selectedLat, selectedLng, uploading, inspecting]);
+  }, [file, fileType, selectedLat, selectedLng, hasWkt, hasH3, selectedH3, uploading, inspecting]);
 
   async function handlePickFile(nextFile: File) {
     setError("");
@@ -70,10 +71,18 @@ export function UploadPanel() {
         setSelectedLat(result.suggestions?.latColumn ?? "");
         setSelectedLng(result.suggestions?.lngColumn ?? "");
         setSelectedWkt(result.suggestions?.wktColumn ?? "");
-        setHasWkt(!!result.hasWktColumn);
-        setSuggestedLayerType(result.hasWktColumn ? "line" : "circle");
-        setRenderType(result.hasWktColumn ? "line" : "point");
-        setInfo(`CSV detected with ${result.columns.length} column(s).`);
+        setHasH3(!!(result as any).hasH3Column);
+        setSelectedH3((result.suggestions as any)?.h3Column ?? "");
+        if ((result as any).hasH3Column) {
+          setSuggestedLayerType("fill");
+          setRenderType("polygon");
+          setInfo(`CSV with H3 indexes detected — ${result.columns.length} column(s).`);
+        } else {
+          setHasWkt(!!result.hasWktColumn);
+          setSuggestedLayerType(result.hasWktColumn ? "line" : "circle");
+          setRenderType(result.hasWktColumn ? "line" : "point");
+          setInfo(`CSV detected with ${result.columns.length} column(s).`);
+        }
       } else {
         setFileType("geojson");
         const nextRenderType = result.renderType;
@@ -135,7 +144,7 @@ export function UploadPanel() {
   async function handleUpload() {
     if (!file) return;
 
-    if (fileType === "csv" && (!selectedLat || !selectedLng)) {
+    if (fileType === "csv" && !hasH3 && !hasWkt && (!selectedLat || !selectedLng)) {
       setError("Please select latitude and longitude columns.");
       return;
     }
@@ -148,9 +157,10 @@ export function UploadPanel() {
     try {
       const result = await uploadDataset({
         file,
-        latColumn: fileType === "csv" && !hasWkt ? selectedLat : undefined,
-        lngColumn: fileType === "csv" && !hasWkt ? selectedLng : undefined,
+        latColumn: fileType === "csv" && !hasWkt && !hasH3 ? selectedLat : undefined,
+        lngColumn: fileType === "csv" && !hasWkt && !hasH3 ? selectedLng : undefined,
         wktColumn: fileType === "csv" && hasWkt ? selectedWkt : undefined,
+        h3Column:  fileType === "csv" && hasH3  ? selectedH3  : undefined,
         onProgress: (pct) => setProgress(pct),
       });
 
@@ -175,6 +185,8 @@ export function UploadPanel() {
     setColumns([]);
     setSelectedLat("");
     setSelectedLng("");
+    setSelectedH3("");
+    setHasH3(false);
     setSuggestedLayerType("fill");
     setRenderType(undefined);
     setProgress(0);
@@ -225,7 +237,18 @@ export function UploadPanel() {
 
       {fileType === "csv" && columns.length > 0 && (
         <div style={{ display: "grid", gap: 10 }}>
-          {hasWkt ? (
+          {hasH3 ? (
+            <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
+              <span>H3 index column</span>
+              <select value={selectedH3} onChange={(e) => setSelectedH3(e.target.value)}>
+                <option value="">Select H3 column</option>
+                {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                Hexagon cells will be converted to polygon geometries
+              </span>
+            </label>
+          ) : hasWkt ? (
             <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
               <span>WKT geometry column</span>
               <select value={selectedWkt} onChange={(e) => setSelectedWkt(e.target.value)}>

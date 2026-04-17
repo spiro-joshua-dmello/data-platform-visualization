@@ -15,7 +15,7 @@ export type Dataset = {
 export type Symbology =
   | { mode: "single" }
   | { mode: "categorized"; col: string; palette: string; colors: string[]; values: string[] }
-  | { mode: "graduated"; col: string; palette: string; colors: string[]; min: number; max: number };
+  | { mode: "graduated"; col: string; palette: string; colors: string[]; min: number; max: number; breaks?: number[] };
 
 export type LayerConfig = {
   id: string;

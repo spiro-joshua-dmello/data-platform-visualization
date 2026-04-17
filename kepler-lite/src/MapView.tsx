@@ -1426,9 +1426,17 @@ export function MapView() {
                     return stops;
                   }
                   if (sym.mode === "graduated" && sym.colors?.length) {
-                    const min = sym.min ?? 0;
-                    const max = sym.max ?? 100;
                     const colors = sym.colors;
+                    // Use class breaks if available (step expression = discrete classes)
+                    if (sym.breaks && sym.breaks.length === colors.length + 1) {
+                      const expr: any[] = ["step", ["to-number", ["get", sym.col], sym.breaks[0]], colors[0]];
+                      for (let i = 1; i < colors.length; i++) {
+                        expr.push(sym.breaks[i], colors[i]);
+                      }
+                      return expr;
+                    }
+                    // Fallback: interpolate between min/max
+                    const min = sym.min ?? 0, max = sym.max ?? 100;
                     const stops: any[] = ["interpolate", ["linear"], ["to-number", ["get", sym.col], min]];
                     colors.forEach((c: string, idx: number) => {
                       const t = colors.length === 1 ? 0 : idx / (colors.length - 1);

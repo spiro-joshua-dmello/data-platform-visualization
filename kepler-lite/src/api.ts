@@ -10,12 +10,14 @@ export type InspectResponse =
       fileType: "csv";
       columns: string[];
       sampleRows: Record<string, unknown>[];
+      hasH3Column?: boolean;
       suggestions: {
         latColumn: string | null;
         lngColumn: string | null;
-        wktColumn?: string;
+        wktColumn?: string | null;
+        h3Column?: string | null;
       };
-      suggestedLayerType?: "circle";
+      suggestedLayerType?: "circle" | "fill";
     }
   | {
       ok: true;
@@ -103,6 +105,7 @@ export function uploadDatasetWithProgress(opts: {
   latColumn?: string;
   lngColumn?: string;
   wktColumn?: string;
+  h3Column?: string;
   onProgress?: (pct: number) => void;
 }): Promise<UploadResponse> {
   const { file, latColumn, lngColumn, wktColumn, onProgress } = opts;
@@ -148,6 +151,7 @@ export function uploadDatasetWithProgress(opts: {
     if (latColumn) form.append("latColumn", latColumn);
     if (lngColumn) form.append("lngColumn", lngColumn);
     if (wktColumn) form.append("wktColumn", wktColumn);
+    if (opts.h3Column) form.append("h3Column", opts.h3Column);
 
     xhr.send(form);
   });

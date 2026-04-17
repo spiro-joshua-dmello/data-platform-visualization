@@ -94,26 +94,19 @@ function LayerLegend({ layer, ds }: { layer: any; ds: any }) {
   }
 
   if (sym.mode === "categorized" && sym.values?.length) {
-    const items: string[] = sym.values.slice(0, 5);
-    const more = sym.values.length - 5;
     return (
-      <div style={{ marginTop: 5, paddingLeft: 28, display: "flex", flexDirection: "column", gap: 3 }}>
-        {items.map((val: string, i: number) => (
-          <div key={val} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ marginTop: 5, paddingLeft: 28, display: "flex", flexDirection: "column", gap: 3, maxHeight: 110, overflowY: "auto", scrollbarWidth: "thin" }}>
+        {(sym.values as string[]).map((val: string, i: number) => (
+          <div key={val} style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
             <LayerSwatch type={layer.type} color={sym.colors[i % sym.colors.length]} size={11} />
             <span style={{
               fontSize: 11, color: T.textMuted, fontFamily: T.font,
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160,
             }}>
-              {val || "(blank)"}
+              {val || "No Data"}
             </span>
           </div>
         ))}
-        {more > 0 && (
-          <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.font, marginLeft: 17 }}>
-            +{more} more
-          </span>
-        )}
       </div>
     );
   }
@@ -1188,6 +1181,80 @@ const CONTINUOUS_PALETTES_V2: Record<string, string[]> = {
   "RdYlGn":    ["#d73027","#f46d43","#fee08b","#d9ef8b","#66bd63","#1a9850"],
 };
 
+
+// ─── Classification methods ───────────────────────────────────────────────────
+type ClassMethod = "equalInterval" | "quantile" | "naturalBreaks" | "stdDev";
+
+function computeBreaks(nums: number[], n: number, method: ClassMethod): number[] {
+  if (nums.length === 0 || n < 2) return [];
+  const sorted = [...nums].sort((a, b) => a - b);
+  const min = sorted[0], max = sorted[sorted.length - 1];
+
+  if (method === "equalInterval") {
+    const step = (max - min) / n;
+    return Array.from({ length: n + 1 }, (_, i) => min + i * step);
+  }
+
+  if (method === "quantile") {
+    const breaks = [min];
+    for (let i = 1; i < n; i++) {
+      const idx = (i / n) * (sorted.length - 1);
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      breaks.push(sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo));
+    }
+    breaks.push(max);
+    return breaks;
+  }
+
+  if (method === "naturalBreaks") {
+    // Jenks natural breaks
+    const mat1: number[][] = Array.from({ length: sorted.length + 1 }, () => new Array(n + 1).fill(0));
+    const mat2: number[][] = Array.from({ length: sorted.length + 1 }, () => new Array(n + 1).fill(Infinity));
+    for (let i = 1; i <= n; i++) { mat1[1][i] = 1; mat2[1][i] = 0; }
+    for (let j = 2; j <= sorted.length; j++) mat2[j][1] = Infinity;
+
+    for (let j = 2; j <= sorted.length; j++) {
+      let s1 = 0, s2 = 0, w = 0;
+      for (let m = 1; m <= j; m++) {
+        const i3 = j - m + 1;
+        const val = sorted[i3 - 1];
+        s2 += val * val; s1 += val; w++;
+        const v = s2 - (s1 * s1) / w;
+        if (i3 !== 1) {
+          for (let k = 2; k <= n; k++) {
+            if (mat2[j][k] >= v + mat2[i3 - 1][k - 1]) {
+              mat1[j][k] = i3; mat2[j][k] = v + mat2[i3 - 1][k - 1];
+            }
+          }
+        }
+      }
+      mat1[j][1] = 1; mat2[j][1] = s2 - (s1 * s1) / w;
+    }
+
+    const kclass: number[] = new Array(n + 1).fill(0);
+    kclass[n] = sorted.length;
+    kclass[1] = 1;
+    for (let k = n; k >= 2; k--) kclass[k - 1] = mat1[kclass[k]][k] - 1;
+    return [min, ...kclass.slice(2).map(i => sorted[i - 1]), max];
+  }
+
+  if (method === "stdDev") {
+    const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
+    const std = Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length);
+    const breaks = [min];
+    for (let i = -(n / 2 - 0.5); i <= n / 2; i++) {
+      const v = mean + i * std;
+      if (v > min && v < max) breaks.push(v);
+    }
+    breaks.push(max);
+    // Ensure exactly n+1 breaks
+    while (breaks.length < n + 1) breaks.splice(breaks.length - 1, 0, (breaks[breaks.length - 2] + max) / 2);
+    return breaks.slice(0, n + 1);
+  }
+
+  return [];
+}
+
 // ─── Symbology Tab ────────────────────────────────────────────────────────────
 function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
   const { datasets } = useAppStore();
@@ -1201,10 +1268,16 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
   const [rampPalette, setRampPalette] = useState(existing?.palette ?? "Viridis");
   const [columns, setColumns]         = useState<string[]>([]);
   const [colValues, setColValues]     = useState<string[]>([]);
+  
   // per-item colour overrides for categorized; key = value string, value = hex colour
   const [catColorOverrides, setCatColorOverrides] = useState<Record<string,string>>({});
   const [colLoading, setColLoading]   = useState(false);
   const [applied, setApplied]         = useState(false);
+  const [numClasses, setNumClasses]   = useState(5);
+  const [classMethod, setClassMethod] = useState<ClassMethod>("equalInterval");
+  // customBreaks: array of n+1 boundary values, editable by user; null = auto-computed
+  const [customBreaks, setCustomBreaks] = useState<number[] | null>(null);
+  
 
   // true when every non-empty value in the column parses as a finite number
   const isNumericCol = colValues.length > 0 && colValues
@@ -1213,6 +1286,12 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
   // numeric range for graduated
   const [numRange, setNumRange]       = useState<[number,number]>([0, 100]);
 
+  // Numeric values for break computation
+  const numericVals = colValues.map(Number).filter(Number.isFinite);
+  const autoBreaks = numericVals.length >= 2
+    ? computeBreaks(numericVals, numClasses, classMethod)
+    : [];
+  const activeBreaks = customBreaks ?? autoBreaks;
   useEffect(() => {
     if (!dataset?.id) return;
     setColLoading(true);
@@ -1229,8 +1308,9 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
       .finally(() => setColLoading(false));
   }, [dataset?.id]);
 
+  // AFTER — remove the mode === "single" guard so values load eagerly
   useEffect(() => {
-    if (!dataset?.id || !attrCol || mode === "single") return;
+    if (!dataset?.id || !attrCol) return;
     fetch(`${API}/datasets/${dataset.id}/column-values/${encodeURIComponent(attrCol)}`)
       .then((r) => r.json())
       .then((data) => {
@@ -1240,13 +1320,12 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
             return s;
           });
           setColValues(vals);
-          // compute numeric range for graduated
           const nums = vals.map(Number).filter(Number.isFinite);
           if (nums.length) setNumRange([Math.min(...nums), Math.max(...nums)]);
         }
       })
-        .catch(() => setColValues([]));
-  }, [dataset?.id, attrCol, mode]);
+      .catch(() => setColValues([]));
+  }, [dataset?.id, attrCol]); // removed `mode` from deps
 
   // Auto-switch away from graduated if column is non-numeric
   useEffect(() => {
@@ -1268,7 +1347,15 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
       );
       updateLayer(layer.id, { symbology: { mode: "categorized", col: attrCol, palette: catPalette, colors: finalColors, values: colValues } });
     } else if (mode === "graduated") {
-      updateLayer(layer.id, { symbology: { mode: "graduated", col: attrCol, palette: rampPalette, colors: RAMP_PALETTES[rampPalette], min: numRange[0], max: numRange[1] } });
+      const breaks = activeBreaks.length >= 2 ? activeBreaks : [numRange[0], numRange[1]];
+      const classColors = Array.from({ length: breaks.length - 1 }, (_, i) => {
+        const t = (breaks.length - 1) === 1 ? 0 : i / (breaks.length - 2);
+        return rampColors[Math.round(t * (rampColors.length - 1))];
+      });
+      updateLayer(layer.id, { symbology: {
+        mode: "graduated", col: attrCol, palette: rampPalette,
+        colors: classColors, breaks, min: breaks[0], max: breaks[breaks.length - 1],
+      }});
     }
     setApplied(true);
     setTimeout(() => setApplied(false), 1500);
@@ -1278,7 +1365,8 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
   const rampColors = RAMP_PALETTES[rampPalette];
 
   return (
-    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 180px)" }}>
+    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto", flex: 1 }}>
       <div>
         <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Symbol type</div>
         <div style={{ display: "flex", gap: 4 }}>
@@ -1351,8 +1439,8 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
           {colValues.length > 0 && (
             <div>
               <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Legend preview <span style={{ fontSize: 10, color: T.textLight }}>(click swatch to edit colour)</span></div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {colValues.slice(0, 8).map((val, i) => {
+              <div style={{ maxHeight: 180, overflowY: "auto", scrollbarWidth: "thin", display: "flex", flexDirection: "column", gap: 4 }}>
+                {colValues.map((val, i) => {
                   const displayLabel = val === "" || val === null ? "No Data" : val;
                   const currentColor = catColorOverrides[val] ?? catColors[i % catColors.length];
                   return (
@@ -1368,7 +1456,6 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
                     </div>
                   );
                 })}
-                {colValues.length > 8 && <span style={{ fontSize: 11, color: T.textLight, fontFamily: T.font }}>+{colValues.length - 8} more</span>}
               </div>
             </div>
           )}
@@ -1376,28 +1463,115 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
       )}
 
       {mode === "graduated" && (
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Colour ramp</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            {Object.entries(RAMP_PALETTES).map(([name, colors]) => (
-              <button key={name} onClick={() => setRampPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${rampPalette === name ? T.accent : T.border}`, background: rampPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 52, textAlign: "left" }}>{name}</span>
-                <div style={{ flex: 1, height: 14, borderRadius: 4, background: `linear-gradient(to right, ${colors[0]}, ${colors[Math.floor(colors.length/2)]}, ${colors[colors.length-1]})` }}/>
-              </button>
-            ))}
+        <>
+          {/* Colour ramp */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Colour ramp</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {Object.entries(RAMP_PALETTES).map(([name, colors]) => (
+                <button key={name} onClick={() => setRampPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${rampPalette === name ? T.accent : T.border}`, background: rampPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 52, textAlign: "left" }}>{name}</span>
+                  <div style={{ flex: 1, height: 14, borderRadius: 4, background: `linear-gradient(to right, ${colors[0]}, ${colors[Math.floor(colors.length/2)]}, ${colors[colors.length-1]})` }}/>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
 
-      {(
-        <button onClick={applySymbology} style={{
-          padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
-          fontSize: 12, fontWeight: 600, fontFamily: T.font,
-          background: applied ? T.green : T.accent, color: "white",
-        }}>
-          {applied ? "✓ Applied" : "Apply symbology"}
-        </button>
+          {/* Classification method */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Classification method</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {([
+                ["equalInterval", "Equal Interval"],
+                ["quantile",      "Quantile"],
+                ["naturalBreaks", "Natural Breaks (Jenks)"],
+                ["stdDev",        "Standard Deviation"],
+              ] as [ClassMethod, string][]).map(([val, label]) => (
+                <button key={val} onClick={() => { setClassMethod(val); setCustomBreaks(null); }}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${classMethod === val ? T.accent : T.border}`, background: classMethod === val ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer", textAlign: "left" }}>
+                  <div style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${classMethod === val ? T.accent : T.border}`, background: classMethod === val ? T.accent : "white", flexShrink: 0 }}/>
+                  <span style={{ fontSize: 11, fontWeight: classMethod === val ? 600 : 400, color: T.text, fontFamily: T.font }}>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Classes slider */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Classes</span>
+              <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font }}>{numClasses}</span>
+            </div>
+            <input type="range" min={2} max={9} step={1}
+              value={numClasses}
+              onChange={(e) => { setNumClasses(Number(e.target.value)); setCustomBreaks(null); }}
+              style={{ width: "100%", accentColor: T.text }}
+            />
+          </div>
+
+          {/* Legend preview with editable breaks */}
+          {activeBreaks.length >= 2 && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Legend preview</span>
+                <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.font }}>(edit boundaries)</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {Array.from({ length: activeBreaks.length - 1 }, (_, i) => {
+                  const lo = activeBreaks[i];
+                  const hi = activeBreaks[i + 1];
+                  const colorIdx = Math.round((i / (activeBreaks.length - 2 || 1)) * (rampColors.length - 1));
+                  const swatchColor = rampColors[colorIdx];
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ width: 18, height: 18, borderRadius: 3, background: swatchColor, flexShrink: 0, border: "1px solid rgba(0,0,0,0.1)" }} />
+                      {/* Lower bound — editable for all rows except first */}
+                      {i === 0 ? (
+                        <span style={{ fontSize: 11, color: T.textLight, fontFamily: T.font, width: 60, textAlign: "right" }}>{lo.toFixed(1)}</span>
+                      ) : (
+                        <input
+                          type="text"
+                          key={`break-${i}-${(customBreaks ?? autoBreaks)[i]}`}
+                          defaultValue={String((customBreaks ?? autoBreaks)[i].toFixed(1))}
+                          onBlur={(e) => {
+                            const val = Number(e.target.value.replace(/[^0-9.\-]/g, ""));
+                            if (!Number.isFinite(val)) return;
+                            const next = [...(customBreaks ?? autoBreaks)];
+                            next[i] = val;
+                            setCustomBreaks(next);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                          style={{ width: 64, fontSize: 11, fontFamily: T.font, border: `1px solid ${T.border}`, borderRadius: 4, padding: "2px 6px", textAlign: "right", color: T.text, outline: "none", background: "white" }}
+                        />
+                      )}
+                      <span style={{ fontSize: 11, color: T.textLight, fontFamily: T.font }}>–</span>
+                      <span style={{ fontSize: 11, color: T.text, fontFamily: T.font }}>{hi.toFixed(1)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {customBreaks && (
+                <button onClick={() => setCustomBreaks(null)}
+                  style={{ marginTop: 6, fontSize: 10, color: T.accent, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: T.font, textDecoration: "underline" }}>
+                  Reset to {classMethod === "equalInterval" ? "equal interval" : classMethod === "quantile" ? "quantile" : classMethod === "naturalBreaks" ? "natural breaks" : "std dev"} breaks
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
+    </div>
+    <div style={{ padding: "12px 16px", borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+      <button onClick={applySymbology} style={{
+        width: "100%", padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
+        fontSize: 12, fontWeight: 600, fontFamily: T.font,
+        background: applied ? T.green : T.accent, color: "white",
+      }}>
+        {applied ? "✓ Applied" : "Apply symbology"}
+      </button>
+    </div>
     </div>
   );
 }

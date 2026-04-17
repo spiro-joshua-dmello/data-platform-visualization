@@ -13,6 +13,7 @@
   "dependencies": {
     "@hono/node-server": "^1.19.9",
     "@types/stream-json": "^1.7.8",
+    "h3-js": "^4.4.0",
     "hono": "^4.11.10",
     "papaparse": "^5.5.3",
     "postgres": "^3.4.8",

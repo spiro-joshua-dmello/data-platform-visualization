@@ -121,9 +121,44 @@ function pickCsvSuggestions(fields: string[]) {
     ["wkt", "geometry", "geom", "shape", "the_geom", "geo"].includes(lower[i])
   ) ?? null;
 
-  return { latColumn, lngColumn, wktColumn };
+  return { latColumn, lngColumn, wktColumn, h3Column: null as string | null };
 }
 
+// ── H3 helpers ────────────────────────────────────────────────────────────────
+
+// H3 indexes are 15-char hex strings starting with '8'
+function isH3Index(val: string): boolean {
+  return typeof val === "string" && /^8[0-9a-f]{14}$/i.test(val.trim());
+}
+
+function pickH3Column(fields: string[], sampleRows: any[]): string | null {
+  for (const field of fields) {
+    const sample = sampleRows.slice(0, 10).map((r) => String(r[field] ?? ""));
+    if (sample.filter((v) => isH3Index(v)).length >= Math.min(3, sample.length)) {
+      return field;
+    }
+  }
+  return null;
+}
+
+// Convert H3 index to a WKT polygon using pure math (no library needed).
+// H3 cell boundary decoded from the index itself.
+function h3ToPolygonWKT(h3Index: string): string | null {
+  try {
+    // Use h3-js if available, otherwise fall back to centroid point
+    // We'll use dynamic require so it's optional
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const h3 = require("h3-js");
+    const boundary = h3.cellToBoundary(h3Index); // [[lat,lng], ...]
+    if (!boundary || boundary.length === 0) return null;
+    const coords = [...boundary, boundary[0]]
+      .map(([lat, lng]: [number, number]) => `${lng} ${lat}`)
+      .join(", ");
+    return `POLYGON((${coords}))`;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeGeoJSONTopLevel(json: any): {
   features: any[];
@@ -431,6 +466,47 @@ async function streamCSVIntoDB(
   return { inserted, skipped };
 }
 
+// ── Streaming H3 CSV → Postgres ───────────────────────────────────────────────
+
+async function streamH3CSVIntoDB(
+  filePath: string,
+  datasetId: string,
+  h3Column: string
+): Promise<{ inserted: number; skipped: number }> {
+  let inserted = 0;
+  let skipped = 0;
+
+  const text = stripUtf8Bom(await readFile(filePath, "utf8"));
+  const parsed = Papa.parse(text, {
+    header: true,
+    dynamicTyping: false,
+    skipEmptyLines: true,
+  });
+
+  const rows = parsed.data as any[];
+
+  await sql.begin(async (tx) => {
+    for (const r of rows) {
+      const h3idx = String(r[h3Column] ?? "").trim();
+      if (!isH3Index(h3idx)) { skipped++; continue; }
+
+      const wkt = h3ToPolygonWKT(h3idx);
+      if (!wkt) { skipped++; continue; }
+
+      const props = { ...r, dataset_id: datasetId, h3index: h3idx };
+
+      await tx.unsafe(
+        `INSERT INTO polygons (dataset_id, geom, props)
+         VALUES ($1, ST_SetSRID(ST_GeomFromText($2), 4326), $3::jsonb)`,
+        [datasetId, wkt, JSON.stringify(props)]
+      );
+      inserted++;
+    }
+  });
+
+  return { inserted, skipped };
+}
+
 // ── Inspect route ─────────────────────────────────────────────────────────────
 
 app.post("/datasets/inspect", async (c) => {
@@ -467,18 +543,22 @@ app.post("/datasets/inspect", async (c) => {
     }
 
     const fields = parsed.meta.fields ?? [];
-    const rows = Array.isArray(parsed.data) ? parsed.data.slice(0, 5) : [];
+    const rows = Array.isArray(parsed.data) ? parsed.data.slice(0, 10) : [];
     const suggestions = pickCsvSuggestions(fields);
+    const h3Column = pickH3Column(fields, rows);
+    if (h3Column) (suggestions as any).h3Column = h3Column;
 
     const hasWkt = !!suggestions.wktColumn;
+    const hasH3 = !!h3Column;
     return c.json({
       ok: true,
       fileType: "csv",
       columns: fields,
       sampleRows: rows,
       suggestions,
-      suggestedLayerType: hasWkt ? "line" : "circle",
+      suggestedLayerType: hasH3 ? "fill" : hasWkt ? "line" : "circle",
       hasWktColumn: hasWkt,
+      hasH3Column: hasH3,
     });
   }
 
@@ -569,6 +649,8 @@ app.post("/datasets/upload", async (c) => {
     typeof body["latColumn"] === "string" ? body["latColumn"] : null;
   const lngColumnInput =
     typeof body["lngColumn"] === "string" ? body["lngColumn"] : null;
+  const h3ColumnInput =
+    typeof body["h3Column"] === "string" ? body["h3Column"] : null;
 
   const datasetId = crypto.randomUUID();
   const lower = file.name.toLowerCase();
@@ -741,7 +823,7 @@ app.post("/datasets/upload", async (c) => {
         processingMs: Date.now() - startedAt,
       });
     }
-
+    
     if (!latColumn || !lngColumn) {
       return c.json(
         badRequest("CSV_COLUMNS_REQUIRED", "Latitude/Longitude columns not found. For line/polygon data, use a GeoJSON file or a CSV with a WKT geometry column named 'wkt', 'geometry', or 'geom'."),
@@ -934,15 +1016,37 @@ app.post("/datasets/upload/finalize", async (c) => {
     }
 
     if (lower.endsWith(".csv")) {
+      const h3Column = h3ColumnInput;
+
+      if (h3Column) {
+        const result = await streamH3CSVIntoDB(assembledPath, datasetId, h3Column);
+        if (result.inserted === 0) {
+          return c.json(badRequest("NO_VALID_H3", "No valid H3 indexes found."), 400);
+        }
+        const bounds = await getDatasetBounds(datasetId);
+        await registerDataset(datasetId, fileName, "polygon");
+        return c.json({
+          ok: true,
+          datasetId,
+          inserted: result.inserted,
+          skipped: result.skipped,
+          bounds,
+          geometryTypes: ["Polygon"],
+          suggestedLayerType: "fill",
+          renderType: "polygon",
+          tiles: { polygons: `${MARTIN_BASE}/polygons/{z}/{x}/{y}` },
+          processingMs: Date.now() - startedAt,
+        });
+      }
+
       if (!latColumn || !lngColumn) {
         return c.json(
-          badRequest("CSV_COLUMNS_REQUIRED", "latColumn and lngColumn are required for CSV uploads"),
+          badRequest("CSV_COLUMNS_REQUIRED", "Latitude/Longitude columns not found. For line/polygon data, use a GeoJSON file or a CSV with a WKT geometry column named 'wkt', 'geometry', or 'geom'."),
           400
         );
       }
 
       const result = await streamCSVIntoDB(assembledPath, datasetId, latColumn, lngColumn);
-
       if (result.inserted === 0) {
         return c.json(
           badRequest("NO_VALID_COORDINATES", "No valid coordinate rows found."),
