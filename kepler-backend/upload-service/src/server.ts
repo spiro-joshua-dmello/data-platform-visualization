@@ -128,15 +128,18 @@ function pickCsvSuggestions(fields: string[]) {
 
 // H3 indexes are 15-char hex strings starting with '8'
 function isH3Index(val: string): boolean {
-  return typeof val === "string" && /^8[0-9a-f]{14}$/i.test(val.trim());
+  return typeof val === "string" && /^[0-9a-f]{15}$/i.test(val.trim());
 }
 
+// AFTER — also check column name as a hint
 function pickH3Column(fields: string[], sampleRows: any[]): string | null {
+  const H3_NAME_HINTS = ["h3", "h3index", "h3_index", "hex", "cell", "hexid", "grid_id"];
   for (const field of fields) {
     const sample = sampleRows.slice(0, 10).map((r) => String(r[field] ?? ""));
-    if (sample.filter((v) => isH3Index(v)).length >= Math.min(3, sample.length)) {
-      return field;
-    }
+    const matchCount = sample.filter((v) => isH3Index(v)).length;
+    if (matchCount >= Math.min(3, sample.length)) return field;
+    // fallback: name-based hint with at least 1 matching value
+    if (H3_NAME_HINTS.includes(field.toLowerCase().trim()) && matchCount >= 1) return field;
   }
   return null;
 }
@@ -773,6 +776,30 @@ app.post("/datasets/upload", async (c) => {
     const wktColumnInput = typeof body["wktColumn"] === "string" ? body["wktColumn"] : null;
     const wktColumn = wktColumnInput ?? suggestions.wktColumn;
 
+    // H3 mode
+    if (h3ColumnInput) {
+      const tmpPath = `/tmp/${datasetId}.csv`;
+      await Bun.write(tmpPath, text);
+      const result = await streamH3CSVIntoDB(tmpPath, datasetId, h3ColumnInput);
+      if (result.inserted === 0) {
+        return c.json(badRequest("NO_VALID_H3", "No valid H3 indexes found."), 400);
+      }
+      const bounds = await getDatasetBounds(datasetId);
+      await registerDataset(datasetId, file.name, "polygon");
+      return c.json({
+        ok: true,
+        datasetId,
+        inserted: result.inserted,
+        skipped: result.skipped,
+        bounds,
+        geometryTypes: ["Polygon"],
+        suggestedLayerType: "fill",
+        renderType: "polygon",
+        tiles: { polygons: `${MARTIN_BASE}/polygons/{z}/{x}/{y}` },
+        processingMs: Date.now() - startedAt,
+      });
+    }
+
     // WKT mode — supports points, lines, polygons from a geometry column
     if (wktColumn) {
       let inserted = 0;
@@ -920,6 +947,8 @@ app.post("/datasets/upload/init", async (c) => {
 
 app.post("/datasets/upload/chunk", async (c) => {
   const body = await c.req.parseBody();
+  console.log("UPLOAD BODY KEYS:", Object.keys(body));
+  console.log("h3Column value:", body["h3Column"]);
   const uploadId = body["uploadId"] as string;
   const chunkIndex = Number(body["chunkIndex"]);
   const chunk = body["chunk"];

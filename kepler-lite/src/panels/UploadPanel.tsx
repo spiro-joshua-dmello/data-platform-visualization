@@ -143,7 +143,7 @@ export function UploadPanel() {
 
   async function handleUpload() {
     if (!file) return;
-
+    console.log("handleUpload state:", { hasH3, selectedH3, hasWkt, fileType });
     if (fileType === "csv" && !hasH3 && !hasWkt && (!selectedLat || !selectedLng)) {
       setError("Please select latitude and longitude columns.");
       return;
@@ -237,6 +237,26 @@ export function UploadPanel() {
 
       {fileType === "csv" && columns.length > 0 && (
         <div style={{ display: "grid", gap: 10 }}>
+          {/* Geometry type selector — always visible for CSV */}
+          <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
+            <span>Geometry type</span>
+            <select
+              value={hasH3 ? "h3" : hasWkt ? "wkt" : "latlon"}
+              onChange={(e) => {
+                const v = e.target.value;
+                setHasH3(v === "h3");
+                setHasWkt(v === "wkt");
+                if (v === "h3") { setSuggestedLayerType("fill"); setRenderType("polygon"); }
+                if (v === "wkt") { setSuggestedLayerType("line"); setRenderType("line"); }
+                if (v === "latlon") { setSuggestedLayerType("circle"); setRenderType("point"); }
+              }}
+            >
+              <option value="latlon">Lat / Lon columns</option>
+              <option value="wkt">WKT geometry column</option>
+              <option value="h3">H3 index column</option>
+            </select>
+          </label>
+
           {hasH3 ? (
             <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text)" }}>
               <span>H3 index column</span>

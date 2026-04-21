@@ -1489,7 +1489,7 @@ export function MapView() {
                     paint={{
                       "fill-color":         colorExpr,
                       "fill-opacity":       layer.opacity * 0.7,
-                      "fill-outline-color": color,
+                      "fill-outline-color": (layer as any).strokeColor ?? color,
                     }}
                   />,
                   <Layer key={`${layer.id}-outline`} id={`${layer.id}-outline`}
@@ -1498,7 +1498,7 @@ export function MapView() {
                     // ← NO filter prop, NO source-layer
                     layout={{ "line-cap": "round", "line-join": "round" }}
                     paint={{
-                      "line-color":   color,
+                      "line-color":   (layer as any).strokeColor ?? color,
                       "line-opacity": layer.opacity,
                       "line-width":   (layer as any).strokeWidth ?? 1.5,
                     }}

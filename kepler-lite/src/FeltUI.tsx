@@ -1109,6 +1109,20 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
                   </div>
                 </div>
               )}
+              {/* Outline colour — only for fill layers */}
+              {layer.type === "fill" && (
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Outline colour</span>
+                    <input
+                      type="color"
+                      value={(layer as any).strokeColor ?? hex}
+                      onChange={(e) => updateLayer(layer.id, { strokeColor: e.target.value } as any)}
+                      style={{ width: 32, height: 22, padding: 1, border: `1px solid ${T.border}`, borderRadius: 4, cursor: "pointer", background: "none" }}
+                    />
+                  </div>
+                </div>
+              )}
               {/* Stroke width — only for line or fill-with-outline */}
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>

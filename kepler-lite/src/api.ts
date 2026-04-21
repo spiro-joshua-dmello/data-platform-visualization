@@ -152,6 +152,9 @@ export function uploadDatasetWithProgress(opts: {
     if (lngColumn) form.append("lngColumn", lngColumn);
     if (wktColumn) form.append("wktColumn", wktColumn);
     if (opts.h3Column) form.append("h3Column", opts.h3Column);
+    console.log("FormData h3Column:", opts.h3Column);
+    console.log("FormData entries:", [...form.entries()].map(([k,v]) => `${k}=${v}`));
+
 
     xhr.send(form);
   });
@@ -166,6 +169,7 @@ async function initChunkedUpload(opts: {
   latColumn?: string;
   lngColumn?: string;
   wktColumn?: string;
+  h3Column?: string;
 }): Promise<{ ok: true; uploadId: string }> {
   const res = await fetch(`${UPLOAD_BASE}/datasets/upload/init`, {
     method: "POST",
@@ -246,12 +250,12 @@ export async function uploadDatasetChunked(opts: {
   latColumn?: string;
   lngColumn?: string;
   wktColumn?: string;
+  h3Column?: string;
   onProgress?: (pct: number) => void;
 }): Promise<UploadResponse> {
   const { file, latColumn, lngColumn, wktColumn, onProgress } = opts;
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-  // Step 1: init session (0%)
   const { uploadId } = await initChunkedUpload({
     fileName: file.name,
     fileSize: file.size,
@@ -259,6 +263,7 @@ export async function uploadDatasetChunked(opts: {
     latColumn,
     lngColumn,
     wktColumn,
+    h3Column: opts.h3Column,
   });
 
   // Step 2: upload chunks (0% → 80%)
@@ -293,6 +298,7 @@ export async function uploadDataset(opts: {
   latColumn?: string;
   lngColumn?: string;
   wktColumn?: string;
+  h3Column?: string;
   onProgress?: (pct: number) => void;
 }): Promise<UploadResponse> {
   if (opts.file.size > CHUNKED_THRESHOLD) {
