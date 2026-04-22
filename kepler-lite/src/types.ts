@@ -63,3 +63,18 @@ export type CatalogDataset = {
   created_at: string;
   feature_count: number;
 };
+
+
+export type MapProject = {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  // snapshot of map state
+  datasets: Dataset[];
+  layers: LayerConfig[];
+  viewState: ViewState;
+  annotations: any[];     // Annotation[]
+  mapPins: any[];          // MapPin[]
+  filterRules: Record<string, any>;
+};

@@ -29,6 +29,19 @@ type ZoomTarget = {
 
 export type FilterRule = { col: string; op: string; val: string; vals?: string[] };
 
+export type MapProject = {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  datasets: Dataset[];
+  layers: LayerConfig[];
+  viewState: ViewState;
+  annotations: Annotation[];
+  mapPins: MapPin[];
+  filterRules: Record<string, { rules: FilterRule[]; matchMode: "AND"|"OR"; uiRules: FilterRule[] }>;
+};
+
 type AppState = {
   datasets: Dataset[];
   layers: LayerConfig[];
@@ -78,9 +91,20 @@ type AppState = {
   filterRules: Record<string, { rules: FilterRule[]; matchMode: "AND"|"OR"; uiRules: FilterRule[] }>;
   setFilterRules: (datasetId: string, rules: FilterRule[], matchMode?: "AND"|"OR") => void;
   setUiRules: (datasetId: string, uiRules: FilterRule[]) => void;
+
+  // ── Projects ──────────────────────────────────────────────────────────────
+  projects: MapProject[];
+  activeProjectId: string | null;
+  createProject: (name: string) => void;
+  switchProject: (id: string) => void;
+  saveCurrentProject: () => void;
+  deleteProject: (id: string) => void;
+  renameProject: (id: string, name: string) => void;
 };
 
 let _zoomTargetId = 0;
+
+function uid() { return Math.random().toString(36).slice(2, 10); }
 
 export const useAppStore = create<AppState>()(persist((set) => ({
   datasets: [],
@@ -195,7 +219,6 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   // ── Filter rules ─────────────────────────────────────────────────────────
   filterRules: {},
   setFilterRules: (datasetId, rules, matchMode = "AND") => {
-    
     set((s) => {
       const updated = { ...s.filterRules };
       if (rules.length === 0) {
@@ -208,13 +231,96 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   },
   setUiRules: (datasetId, uiRules) =>
     set((s) => ({ filterRules: { ...s.filterRules, [datasetId]: { ...(s.filterRules[datasetId] ?? { rules: [], matchMode: "AND" }), uiRules } }})),
+
+  // ── Projects ──────────────────────────────────────────────────────────────
+  projects: [],
+  activeProjectId: null,
+
+  createProject: (name) =>
+    set((s) => {
+      const id = uid();
+      const now = Date.now();
+      const project: MapProject = {
+        id,
+        name,
+        createdAt: now,
+        updatedAt: now,
+        datasets:    s.datasets,
+        layers:      s.layers,
+        viewState:   s.viewState,
+        annotations: s.annotations,
+        mapPins:     s.mapPins,
+        filterRules: s.filterRules,
+      };
+      return {
+        projects: [...s.projects, project],
+        activeProjectId: id,
+      };
+    }),
+
+  switchProject: (id) =>
+    set((s) => {
+      const p = s.projects.find((p) => p.id === id);
+      if (!p) return s;
+      return {
+        activeProjectId: id,
+        datasets:        p.datasets,
+        layers:          p.layers,
+        viewState:       p.viewState,
+        annotations:     p.annotations,
+        mapPins:         p.mapPins,
+        filterRules:     p.filterRules,
+        removedFromMapIds: new Set<string>(),
+      };
+    }),
+
+  saveCurrentProject: () =>
+    set((s) => {
+      if (!s.activeProjectId) return s;
+      return {
+        projects: s.projects.map((p) =>
+          p.id === s.activeProjectId
+            ? {
+                ...p,
+                updatedAt:   Date.now(),
+                datasets:    s.datasets,
+                layers:      s.layers,
+                viewState:   s.viewState,
+                annotations: s.annotations,
+                mapPins:     s.mapPins,
+                filterRules: s.filterRules,
+              }
+            : p
+        ),
+      };
+    }),
+
+  deleteProject: (id) =>
+    set((s) => {
+      const remaining = s.projects.filter((p) => p.id !== id);
+      const wasActive = s.activeProjectId === id;
+      return {
+        projects: remaining,
+        activeProjectId: wasActive ? (remaining[0]?.id ?? null) : s.activeProjectId,
+      };
+    }),
+
+  renameProject: (id, name) =>
+    set((s) => ({
+      projects: s.projects.map((p) =>
+        p.id === id ? { ...p, name, updatedAt: Date.now() } : p
+      ),
+    })),
+
 }), {
   name: "kepler-lite-store",
   partialize: (state) => ({
-    layers:      state.layers,
-    viewState:   state.viewState,
-    annotations: state.annotations,
-    mapPins:     state.mapPins,
-    filterRules: state.filterRules,
+    layers:          state.layers,
+    viewState:       state.viewState,
+    annotations:     state.annotations,
+    mapPins:         state.mapPins,
+    filterRules:     state.filterRules,
+    projects:        state.projects,
+    activeProjectId: state.activeProjectId,
   }),
 }));

@@ -1,8 +1,24 @@
 import type { Bounds, RenderType, LayerType } from "./types";
+import { useAppStore } from "./store";
 
 const UPLOAD_BASE = "http://localhost:8787";
+const BASE = "http://localhost:8787";
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk
 const CHUNKED_THRESHOLD = 50 * 1024 * 1024; // use chunked for files > 50MB
+
+// ── Project header helper ─────────────────────────────────────────────────────
+
+function projectHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const projectId = useAppStore.getState().activeProjectId ?? "default";
+  return { "X-Project-Id": projectId, ...extra };
+}
+
+function projectHeadersForXhr(xhr: XMLHttpRequest) {
+  const projectId = useAppStore.getState().activeProjectId ?? "default";
+  xhr.setRequestHeader("X-Project-Id", projectId);
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export type InspectResponse =
   | {
@@ -81,6 +97,7 @@ export async function inspectDataset(file: File): Promise<InspectResponse> {
   try {
     res = await fetch(`${UPLOAD_BASE}/datasets/inspect`, {
       method: "POST",
+      headers: projectHeaders(),
       body: form,
     });
   } catch (err: any) {
@@ -113,6 +130,7 @@ export function uploadDatasetWithProgress(opts: {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${UPLOAD_BASE}/datasets/upload`);
+    projectHeadersForXhr(xhr);
 
     xhr.upload.onprogress = (evt) => {
       if (evt.lengthComputable && onProgress) {
@@ -153,8 +171,7 @@ export function uploadDatasetWithProgress(opts: {
     if (wktColumn) form.append("wktColumn", wktColumn);
     if (opts.h3Column) form.append("h3Column", opts.h3Column);
     console.log("FormData h3Column:", opts.h3Column);
-    console.log("FormData entries:", [...form.entries()].map(([k,v]) => `${k}=${v}`));
-
+    console.log("FormData entries:", [...form.entries()].map(([k, v]) => `${k}=${v}`));
 
     xhr.send(form);
   });
@@ -173,7 +190,7 @@ async function initChunkedUpload(opts: {
 }): Promise<{ ok: true; uploadId: string }> {
   const res = await fetch(`${UPLOAD_BASE}/datasets/upload/init`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: projectHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(opts),
   });
   const data = await readJsonSafe(res);
@@ -193,6 +210,7 @@ function uploadChunk(opts: {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${UPLOAD_BASE}/datasets/upload/chunk`);
+    projectHeadersForXhr(xhr);
 
     xhr.upload.onprogress = (evt) => {
       if (evt.lengthComputable && onProgress) {
@@ -235,7 +253,7 @@ async function finalizeChunkedUpload(opts: {
 }): Promise<UploadResponse> {
   const res = await fetch(`${UPLOAD_BASE}/datasets/upload/finalize`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: projectHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(opts),
   });
   const data = await readJsonSafe(res);
@@ -307,31 +325,36 @@ export async function uploadDataset(opts: {
   return uploadDatasetWithProgress(opts);
 }
 
-const BASE = "http://localhost:8787";
-
-// ── Dataset catalog ──────────────────────────────────────────────────────────
+// ── Dataset catalog ───────────────────────────────────────────────────────────
 
 export async function fetchCatalog() {
-  const r = await fetch(`${BASE}/datasets`);
-  return r.json() as Promise<{ ok: boolean; datasets: CatalogDataset[] }>;
+  const r = await fetch(`${BASE}/datasets`, {
+    headers: projectHeaders(),
+  });
+  return r.json() as Promise<{ ok: boolean; datasets: any[] }>;
 }
 
 export async function deleteDatasetFromDB(datasetId: string) {
-  const r = await fetch(`${BASE}/datasets/${datasetId}`, { method: "DELETE" });
+  const r = await fetch(`${BASE}/datasets/${datasetId}`, {
+    method: "DELETE",
+    headers: projectHeaders(),
+  });
   return r.json();
 }
 
-// ── Feature CRUD ─────────────────────────────────────────────────────────────
+// ── Feature CRUD ──────────────────────────────────────────────────────────────
 
 export async function fetchFeatures(datasetId: string, table: string) {
-  const r = await fetch(`${BASE}/datasets/${datasetId}/features?table=${table}`);
+  const r = await fetch(`${BASE}/datasets/${datasetId}/features?table=${table}`, {
+    headers: projectHeaders(),
+  });
   return r.json(); // GeoJSON FeatureCollection
 }
 
 export async function addFeature(datasetId: string, geometry: any, properties: any, table: string) {
   const r = await fetch(`${BASE}/datasets/${datasetId}/features`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: projectHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ geometry, properties, table }),
   });
   return r.json();
@@ -340,13 +363,16 @@ export async function addFeature(datasetId: string, geometry: any, properties: a
 export async function updateFeature(table: string, featureId: string, patch: { geometry?: any; properties?: any }) {
   const r = await fetch(`${BASE}/features/${table}/${featureId}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: projectHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(patch),
   });
   return r.json();
 }
 
 export async function deleteFeature(table: string, featureId: string) {
-  const r = await fetch(`${BASE}/features/${table}/${featureId}`, { method: "DELETE" });
+  const r = await fetch(`${BASE}/features/${table}/${featureId}`, {
+    method: "DELETE",
+    headers: projectHeaders(),
+  });
   return r.json();
 }

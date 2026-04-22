@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { useAppStore, type Annotation, type ActiveTool } from "./store";
 import { UploadPanel } from "./panels/UploadPanel";
 import { createPortal } from "react-dom";
-
+import { ProjectsPanel } from "./panels/ProjectsPanel";
 const API = "http://localhost:8787";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -1291,6 +1291,7 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
   const [classMethod, setClassMethod] = useState<ClassMethod>("equalInterval");
   // customBreaks: array of n+1 boundary values, editable by user; null = auto-computed
   const [customBreaks, setCustomBreaks] = useState<number[] | null>(null);
+  const [inverted, setInverted] = useState(false);
   
 
   // true when every non-empty value in the column parses as a finite number
@@ -1362,9 +1363,10 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
       updateLayer(layer.id, { symbology: { mode: "categorized", col: attrCol, palette: catPalette, colors: finalColors, values: colValues } });
     } else if (mode === "graduated") {
       const breaks = activeBreaks.length >= 2 ? activeBreaks : [numRange[0], numRange[1]];
+      const palette = inverted ? [...rampColors].reverse() : rampColors;
       const classColors = Array.from({ length: breaks.length - 1 }, (_, i) => {
         const t = (breaks.length - 1) === 1 ? 0 : i / (breaks.length - 2);
-        return rampColors[Math.round(t * (rampColors.length - 1))];
+        return palette[Math.round(t * (palette.length - 1))];
       });
       updateLayer(layer.id, { symbology: {
         mode: "graduated", col: attrCol, palette: rampPalette,
@@ -1480,12 +1482,34 @@ function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) 
         <>
           {/* Colour ramp */}
           <div>
-            <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Colour ramp</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Colour ramp</span>
+              <button
+                onClick={() => setInverted(!inverted)}
+                title="Invert ramp"
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "2px 8px", borderRadius: 6, border: `1px solid ${T.border}`,
+                  background: inverted ? T.text : "transparent",
+                  color: inverted ? "white" : T.textMuted,
+                  cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: T.font,
+                  transition: "background 0.12s, color 0.12s",
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                  <path d="M1 8h14M10 4l4 4-4 4M6 4L2 8l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Invert
+              </button>
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {Object.entries(RAMP_PALETTES).map(([name, colors]) => (
                 <button key={name} onClick={() => setRampPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${rampPalette === name ? T.accent : T.border}`, background: rampPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
                   <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 52, textAlign: "left" }}>{name}</span>
-                  <div style={{ flex: 1, height: 14, borderRadius: 4, background: `linear-gradient(to right, ${colors[0]}, ${colors[Math.floor(colors.length/2)]}, ${colors[colors.length-1]})` }}/>
+                  <div style={{ flex: 1, height: 14, borderRadius: 4, background: inverted
+                    ? `linear-gradient(to right, ${colors[colors.length-1]}, ${colors[Math.floor(colors.length/2)]}, ${colors[0]})`
+                    : `linear-gradient(to right, ${colors[0]}, ${colors[Math.floor(colors.length/2)]}, ${colors[colors.length-1]})`
+                  }}/>
                 </button>
               ))}
             </div>
@@ -2231,6 +2255,10 @@ export function FeltUI() {
         </div>
       </div>
 
+      {/* Projects panel — top left */}
+      <div style={{ position: "absolute", top: 16, left: 16, zIndex: 20, width: 280 }}>
+        <ProjectsPanel />
+      </div>
       {/* Legend panel — bottom left, above scale bar */}
       <div style={{ position: "absolute", bottom: attrH + 72, left: 16, zIndex: 20, transition: "bottom 0.25s ease" }}>
         <LegendPanel onStyleLayer={handleStyle} onShowAttrTable={handleAttr} editMode={isEditing}/>

@@ -44,7 +44,7 @@ app.use(
       "http://localhost:5175",
     ],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type"],
+    allowHeaders: ["Content-Type", "X-Project-Id"],
   })
 );
 
@@ -128,7 +128,11 @@ function pickCsvSuggestions(fields: string[]) {
 
 // H3 indexes are 15-char hex strings starting with '8'
 function isH3Index(val: string): boolean {
-  return typeof val === "string" && /^[0-9a-f]{15}$/i.test(val.trim());
+  if (typeof val !== "string") return false;
+  const v = val.trim();
+  // H3 indexes are 15 hex chars at res 0, up to 16 at higher resolutions.
+  // All valid H3 indexes start with '8' and are 15–16 hex chars.
+  return /^8[0-9a-f]{14,15}$/i.test(v);
 }
 
 // AFTER — also check column name as a hint
@@ -257,6 +261,10 @@ function badRequest(
   return { ok: false, code, error, ...extra };
 }
 
+function getProjectId(c: any): string {
+  return c.req.header("X-Project-Id") ?? "default";
+}
+
 async function getDatasetBounds(
   datasetId: string
 ): Promise<[number, number, number, number] | null> {
@@ -298,25 +306,28 @@ async function getDatasetBounds(
 async function registerDataset(
   datasetId: string,
   name: string,
-  renderType: string
+  renderType: string,
+  projectId: string
 ) {
   const tableName =
     renderType === "point" ? "points" :
     renderType === "line"  ? "lines"  : "polygons";
-
+ 
   await sql`
-    INSERT INTO datasets (id, name, kind, table_name, created_at)
+    INSERT INTO datasets (id, name, kind, table_name, created_at, project_id)
     VALUES (
       ${datasetId}::uuid,
       ${name},
       ${renderType},
       ${tableName},
-      now()
+      now(),
+      ${projectId}
     )
     ON CONFLICT (id) DO UPDATE
       SET name       = EXCLUDED.name,
           kind       = EXCLUDED.kind,
-          table_name = EXCLUDED.table_name
+          table_name = EXCLUDED.table_name,
+          project_id = EXCLUDED.project_id
   `;
 }
 
@@ -324,7 +335,8 @@ async function registerDataset(
 
 async function streamGeoJSONIntoDB(
   filePath: string,
-  datasetId: string
+  datasetId: string,
+  projectId: string
 ): Promise<{ inserted: number; geomTypes: Set<string> }> {
   const geomTypes = new Set<string>();
   let inserted = 0;
@@ -335,19 +347,19 @@ async function streamGeoJSONIntoDB(
   const flushBatch = async (tx: any) => {
     for (const { table, geom, props } of batch) {
       await tx.unsafe(
-        `INSERT INTO ${table} (dataset_id, geom, props)
-         VALUES (
-           $1,
-           ST_SetSRID(
-             CASE
-               WHEN $4 IN ('Polygon', 'MultiPolygon') THEN ST_Multi(ST_GeomFromGeoJSON($2))
-               ELSE ST_GeomFromGeoJSON($2)
-             END,
-             4326
-           ),
-           to_json($3::text)::jsonb
-         )`,
-        [datasetId, JSON.stringify(geom), sql.json(props), geom.type]
+        `INSERT INTO ${table} (dataset_id, project_id, geom, props)
+          VALUES (
+            $1, $2,
+            ST_SetSRID(
+              CASE
+                WHEN $5 IN ('Polygon', 'MultiPolygon') THEN ST_Multi(ST_GeomFromGeoJSON($3))
+                ELSE ST_GeomFromGeoJSON($3)
+              END,
+              4326
+            ),
+            to_json($4::text)::jsonb
+          )`,
+        [datasetId, projectId, JSON.stringify(geom), sql.json(props), geom.type]
       );
       inserted++;
     }
@@ -425,6 +437,7 @@ async function streamGeoJSONIntoDB(
 async function streamCSVIntoDB(
   filePath: string,
   datasetId: string,
+  projectId: string,
   latColumn: string,
   lngColumn: string
 ): Promise<{ inserted: number; skipped: number }> {
@@ -458,9 +471,9 @@ async function streamCSVIntoDB(
       }
 
       await tx.unsafe(
-        `INSERT INTO points (dataset_id, geom, props)
-         VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4::jsonb)`,
-        [datasetId, lng, lat, JSON.stringify({ ...r, dataset_id: datasetId })]
+        `INSERT INTO points (dataset_id, project_id, geom, props)
+         VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5::jsonb)`,
+        [datasetId, projectId, lng, lat, JSON.stringify({ ...r, dataset_id: datasetId })]
       );
       inserted++;
     }
@@ -474,6 +487,7 @@ async function streamCSVIntoDB(
 async function streamH3CSVIntoDB(
   filePath: string,
   datasetId: string,
+  projectId: string,
   h3Column: string
 ): Promise<{ inserted: number; skipped: number }> {
   let inserted = 0;
@@ -491,6 +505,7 @@ async function streamH3CSVIntoDB(
   await sql.begin(async (tx) => {
     for (const r of rows) {
       const h3idx = String(r[h3Column] ?? "").trim();
+      // console.log(`[H3 debug] column="${h3Column}" raw="${r[h3Column]}" trimmed="${h3idx}" len=${h3idx.length} valid=${isH3Index(h3idx)}`);
       if (!isH3Index(h3idx)) { skipped++; continue; }
 
       const wkt = h3ToPolygonWKT(h3idx);
@@ -499,9 +514,9 @@ async function streamH3CSVIntoDB(
       const props = { ...r, dataset_id: datasetId, h3index: h3idx };
 
       await tx.unsafe(
-        `INSERT INTO polygons (dataset_id, geom, props)
-         VALUES ($1, ST_SetSRID(ST_GeomFromText($2), 4326), $3::jsonb)`,
-        [datasetId, wkt, JSON.stringify(props)]
+        `INSERT INTO polygons (dataset_id, project_id, geom, props)
+         VALUES ($1, $2, ST_SetSRID(ST_GeomFromText($3), 4326), $4::jsonb)`,
+        [datasetId, projectId, wkt, JSON.stringify(props)]
       );
       inserted++;
     }
@@ -525,8 +540,10 @@ app.post("/datasets/inspect", async (c) => {
     ? file.slice(0, INSPECT_SAMPLE_BYTES)
     : file;
 
+  const datasetId = crypto.randomUUID();
+  const projectId = getProjectId(c);
   const lower = file.name.toLowerCase();
-  const text = stripUtf8Bom(await sample.text());
+  const text = stripUtf8Bom(await file.text());
 
   if (lower.endsWith(".csv")) {
     const parsed = Papa.parse(text, {
@@ -656,6 +673,7 @@ app.post("/datasets/upload", async (c) => {
     typeof body["h3Column"] === "string" ? body["h3Column"] : null;
 
   const datasetId = crypto.randomUUID();
+  const projectId = getProjectId(c);
   const lower = file.name.toLowerCase();
   const text = stripUtf8Bom(await file.text());
 
@@ -694,19 +712,19 @@ app.post("/datasets/upload", async (c) => {
         const props = { ...(f.properties ?? {}), dataset_id: datasetId };
 
         await tx.unsafe(
-          `INSERT INTO ${table} (dataset_id, geom, props)
+          `INSERT INTO ${table} (dataset_id, project_id, geom, props)
            VALUES (
-             $1,
+             $1, $2,
              ST_SetSRID(
                CASE
-                 WHEN $4 IN ('Polygon', 'MultiPolygon') THEN ST_Multi(ST_GeomFromGeoJSON($2))
-                 ELSE ST_GeomFromGeoJSON($2)
+                 WHEN $5 IN ('Polygon', 'MultiPolygon') THEN ST_Multi(ST_GeomFromGeoJSON($3))
+                 ELSE ST_GeomFromGeoJSON($3)
                END,
                4326
              ),
-             to_json($3::text)::jsonb
+             to_json($4::text)::jsonb
            )`,
-          [datasetId, JSON.stringify(geom), sql.json(props), geom.type]
+          [datasetId, projectId, JSON.stringify(geom), sql.json(props), geom.type]
         );
 
         inserted++;
@@ -724,7 +742,7 @@ app.post("/datasets/upload", async (c) => {
     const suggestedLayerType = inferSuggestedLayerTypeFromGeomTypes(geometryTypes);
     const renderType = inferDatasetRenderType(geometryTypes);
     const bounds = await getDatasetBounds(datasetId);
-    await registerDataset(datasetId, file.name, renderType);
+    await registerDataset(datasetId, file.name, renderType, projectId);
     return c.json({
       ok: true,
       datasetId,
@@ -780,12 +798,12 @@ app.post("/datasets/upload", async (c) => {
     if (h3ColumnInput) {
       const tmpPath = `/tmp/${datasetId}.csv`;
       await Bun.write(tmpPath, text);
-      const result = await streamH3CSVIntoDB(tmpPath, datasetId, h3ColumnInput);
+      const result = await streamH3CSVIntoDB(tmpPath, datasetId, projectId, h3ColumnInput);
       if (result.inserted === 0) {
         return c.json(badRequest("NO_VALID_H3", "No valid H3 indexes found."), 400);
       }
       const bounds = await getDatasetBounds(datasetId);
-      await registerDataset(datasetId, file.name, "polygon");
+      await registerDataset(datasetId, file.name, "polygon", projectId);
       return c.json({
         ok: true,
         datasetId,
@@ -825,9 +843,9 @@ app.post("/datasets/upload", async (c) => {
               geomTypes.add(upper.startsWith("MULTI") ? "MultiPoint" : "Point");
             }
             await tx.unsafe(
-              `INSERT INTO ${table} (dataset_id, geom, props)
-               VALUES ($1, ST_SetSRID(ST_GeomFromText($2), 4326), $3::jsonb)`,
-              [datasetId, wkt, JSON.stringify(props)]
+              `INSERT INTO ${table} (dataset_id, project_id, geom, props)
+               VALUES ($1, $2, ST_SetSRID(ST_GeomFromText($3), 4326), $4::jsonb)`,
+              [datasetId, projectId, wkt, JSON.stringify(props)]
             );
             inserted++;
           } catch { skipped++; }
@@ -842,7 +860,7 @@ app.post("/datasets/upload", async (c) => {
       const suggestedLayerType = inferSuggestedLayerTypeFromGeomTypes(geometryTypes);
       const renderType = inferDatasetRenderType(geometryTypes);
       const bounds = await getDatasetBounds(datasetId);
-      await registerDataset(datasetId, file.name, renderType);
+      await registerDataset(datasetId, file.name, renderType, projectId);
       return c.json({
         ok: true, datasetId, inserted, bounds, geometryTypes,
         suggestedLayerType, renderType,
@@ -879,9 +897,9 @@ app.post("/datasets/upload", async (c) => {
         const props = { ...r, dataset_id: datasetId };
 
         await tx.unsafe(
-          `INSERT INTO points (dataset_id, geom, props)
-           VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4::jsonb)`,
-          [datasetId, lng, lat, JSON.stringify(props)]
+          `INSERT INTO points (dataset_id, project_id, geom, props)
+           VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5::jsonb)`,
+          [datasetId, projectId, lng, lat, JSON.stringify(props)]
         );
 
         inserted++;
@@ -896,7 +914,7 @@ app.post("/datasets/upload", async (c) => {
     }
 
     const bounds = await getDatasetBounds(datasetId);
-    await registerDataset(datasetId, file.name, "point");
+    await registerDataset(datasetId, file.name, "point", projectId);
     return c.json({
       ok: true,
       datasetId,
@@ -920,7 +938,7 @@ app.post("/datasets/upload", async (c) => {
 
 app.post("/datasets/upload/init", async (c) => {
   const body = await c.req.json();
-  const { fileName, fileSize, totalChunks, latColumn, lngColumn } = body;
+  const { fileName, fileSize, totalChunks, latColumn, lngColumn, h3Column } = body;
 
   if (!fileName || !totalChunks) {
     return c.json(
@@ -935,7 +953,7 @@ app.post("/datasets/upload/init", async (c) => {
 
   await Bun.write(
     join(uploadDir, "meta.json"),
-    JSON.stringify({ fileName, fileSize, totalChunks, latColumn, lngColumn })
+    JSON.stringify({ fileName, fileSize, totalChunks, latColumn, lngColumn, h3Column })
   );
 
   console.log(`[chunked] init uploadId=${uploadId} file=${fileName} chunks=${totalChunks}`);
@@ -1008,12 +1026,13 @@ app.post("/datasets/upload/finalize", async (c) => {
 
   console.log(`[chunked] assembled ${fileName} at ${assembledPath}`);
 
-  const lower = fileName.toLowerCase();
   const datasetId = crypto.randomUUID();
+  const projectId = getProjectId(c);
+  const lower = fileName.toLowerCase();
 
   try {
     if (lower.endsWith(".geojson") || lower.endsWith(".json")) {
-      const result = await streamGeoJSONIntoDB(assembledPath, datasetId);
+      const result = await streamGeoJSONIntoDB(assembledPath, datasetId, projectId);
 
       if (result.inserted === 0) {
         return c.json(
@@ -1026,7 +1045,7 @@ app.post("/datasets/upload/finalize", async (c) => {
       const suggestedLayerType = inferSuggestedLayerTypeFromGeomTypes(geometryTypes);
       const renderType = inferDatasetRenderType(geometryTypes);
       const bounds = await getDatasetBounds(datasetId);
-      await registerDataset(datasetId, fileName, renderType);
+      await registerDataset(datasetId, fileName, renderType, projectId);
       return c.json({
         ok: true,
         datasetId,
@@ -1045,15 +1064,15 @@ app.post("/datasets/upload/finalize", async (c) => {
     }
 
     if (lower.endsWith(".csv")) {
-      const h3Column = h3ColumnInput;
+      const h3Column = meta.h3Column ?? null;
 
       if (h3Column) {
-        const result = await streamH3CSVIntoDB(assembledPath, datasetId, h3Column);
+        const result = await streamH3CSVIntoDB(assembledPath, datasetId, projectId, h3Column);
         if (result.inserted === 0) {
           return c.json(badRequest("NO_VALID_H3", "No valid H3 indexes found."), 400);
         }
         const bounds = await getDatasetBounds(datasetId);
-        await registerDataset(datasetId, fileName, "polygon");
+        await registerDataset(datasetId, fileName, "polygon", projectId);
         return c.json({
           ok: true,
           datasetId,
@@ -1075,7 +1094,7 @@ app.post("/datasets/upload/finalize", async (c) => {
         );
       }
 
-      const result = await streamCSVIntoDB(assembledPath, datasetId, latColumn, lngColumn);
+      const result = await streamCSVIntoDB(assembledPath, datasetId, projectId, latColumn, lngColumn);
       if (result.inserted === 0) {
         return c.json(
           badRequest("NO_VALID_COORDINATES", "No valid coordinate rows found."),
@@ -1084,7 +1103,7 @@ app.post("/datasets/upload/finalize", async (c) => {
       }
 
       const bounds = await getDatasetBounds(datasetId);
-      await registerDataset(datasetId, fileName, "point");
+      await registerDataset(datasetId, fileName, "point", projectId);
       return c.json({
         ok: true,
         datasetId,
@@ -1111,6 +1130,7 @@ app.post("/datasets/upload/finalize", async (c) => {
 
 // GET /datasets — full catalog with feature counts + bounds
 app.get("/datasets", async (c) => {
+  const projectId = getProjectId(c);
   const rows = await sql`
     SELECT
       d.id,
@@ -1142,6 +1162,7 @@ app.get("/datasets", async (c) => {
         SELECT geom FROM polygons WHERE dataset_id = d.id
       ) q
     ) ext ON true
+    WHERE d.project_id = ${projectId}
     ORDER BY d.created_at DESC
   `;
 
@@ -1367,11 +1388,12 @@ app.post("/datasets/:datasetId/features", async (c) => {
   const targetTable: string | null = table ?? getTargetTable(geometry?.type);
   if (!targetTable) return c.json(badRequest("BAD_GEOM", "Unknown geometry type"), 400);
 
+  const projectId = getProjectId(c);
   const [row] = await sql.unsafe(
-    `INSERT INTO ${targetTable} (dataset_id, geom, props)
-     VALUES ($1::uuid, ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), to_json($3::text)::jsonb)
+    `INSERT INTO ${targetTable} (dataset_id, project_id, geom, props)
+     VALUES ($1::uuid, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 4326), to_json($4::text)::jsonb)
      RETURNING id::text`,
-    [datasetId, JSON.stringify(geometry), sql.json({ ...(properties ?? {}), dataset_id: datasetId })]
+    [datasetId, projectId, JSON.stringify(geometry), sql.json({ ...(properties ?? {}), dataset_id: datasetId })]
   );
 
   return c.json({ ok: true, id: (row as any).id });
