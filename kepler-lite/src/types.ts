@@ -12,10 +12,29 @@ export type Dataset = {
   bounds?: Bounds | null;
 };
 
+export type ScaleType = "quantile" | "quantize" | "equalInterval" | "naturalBreaks" | "log" | "sqrt";
+
 export type Symbology =
   | { mode: "single" }
-  | { mode: "categorized"; col: string; palette: string; colors: string[]; values: string[] }
-  | { mode: "graduated"; col: string; palette: string; colors: string[]; min: number; max: number; breaks?: number[] };
+  | {
+      mode: "categorized";
+      col: string;
+      palette: string;
+      colors: string[];
+      values: string[];
+      scale?: "ordinal";          // always ordinal for categorical — kept for parity
+    }
+  | {
+      mode: "graduated";
+      col: string;
+      palette: string;
+      colors: string[];
+      min: number;
+      max: number;
+      breaks?: number[];
+      scale?: ScaleType;          // ← NEW
+      inverted?: boolean;         // ← NEW
+    };
 
 export type LayerConfig = {
   id: string;
@@ -26,7 +45,14 @@ export type LayerConfig = {
   opacity: number;
   color: [number, number, number];
   strokeWidth?: number;
+  strokeColor?: string;           // ← add if not already there
   symbology?: Symbology;
+  // Kepler-style size channel (points only)
+  radiusChannel?: {
+    field: string | null;
+    scale: "linear" | "sqrt" | "log";
+    range: [number, number];      // [minRadius, maxRadius] in px
+  };
 };
 
 export type ViewState = {

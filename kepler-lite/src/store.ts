@@ -91,6 +91,8 @@ type AppState = {
   filterRules: Record<string, { rules: FilterRule[]; matchMode: "AND"|"OR"; uiRules: FilterRule[] }>;
   setFilterRules: (datasetId: string, rules: FilterRule[], matchMode?: "AND"|"OR") => void;
   setUiRules: (datasetId: string, uiRules: FilterRule[]) => void;
+  basemap: string;
+  setBasemap: (b: string) => void;
 
   // ── Projects ──────────────────────────────────────────────────────────────
   projects: MapProject[];
@@ -231,7 +233,8 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   },
   setUiRules: (datasetId, uiRules) =>
     set((s) => ({ filterRules: { ...s.filterRules, [datasetId]: { ...(s.filterRules[datasetId] ?? { rules: [], matchMode: "AND" }), uiRules } }})),
-
+  basemap: "dark",
+  setBasemap: (b) => set({ basemap: b }),
   // ── Projects ──────────────────────────────────────────────────────────────
   projects: [],
   activeProjectId: null,
@@ -322,5 +325,6 @@ export const useAppStore = create<AppState>()(persist((set) => ({
     filterRules:     state.filterRules,
     projects:        state.projects,
     activeProjectId: state.activeProjectId,
+    basemap:         state.basemap,
   }),
 }));

@@ -5,6 +5,108 @@ import { createPortal } from "react-dom";
 import { ProjectsPanel } from "./panels/ProjectsPanel";
 const API = "http://localhost:8787";
 
+
+// ─── Basemap definitions (mirror of MapView for display) ─────────────────────
+const BASEMAP_OPTIONS: { id: string; label: string; preview: string }[] = [
+  { id: "dark",           label: "Dark",           preview: "#1a1a2e" },
+  { id: "light",          label: "Light",          preview: "#f5f5f0" },
+  { id: "google",         label: "Google",         preview: "#e8e0d8" },
+  { id: "google-hybrid",  label: "Satellite",      preview: "#2d4a1e" },
+  { id: "google-no-labels", label: "Google (Clean)", preview: "#ddd8cf" },
+  { id: "osm",            label: "OpenStreetMap",  preview: "#b5d0d0" },
+];
+
+// ─── Basemap Picker ───────────────────────────────────────────────────────────
+function BasemapPicker({ forceOpen, onOpen, onClose }: {
+  forceOpen?: boolean;
+  onOpen?: () => void;
+  onClose?: () => void;
+}) {
+  const { basemap, setBasemap } = useAppStore() as any;
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (forceOpen !== undefined) setOpen(forceOpen);
+  }, [forceOpen]);
+  const current = BASEMAP_OPTIONS.find(b => b.id === (basemap ?? "dark"));
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          if (next) onOpen?.();
+          else onClose?.();
+        }}
+        style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "6px 12px", borderRadius: 10,
+          border: `1px solid ${T.border}`,
+          background: T.card, backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          boxShadow: T.shadow, cursor: "pointer",
+          fontFamily: T.font, fontSize: 12, fontWeight: 600, color: T.text,
+        }}
+      >
+        {/* Colour swatch preview */}
+        <div style={{
+          width: 14, height: 14, borderRadius: 3,
+          background: current?.preview ?? "#1a1a2e",
+          border: `1px solid ${T.border}`, flexShrink: 0,
+        }}/>
+        {current?.label ?? "Basemap"}
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none"
+          style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+          <path d="M4 6l4 4 4-4" stroke={T.textMuted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", bottom: "calc(100% + 8px)", right: 0,
+          background: T.card, backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          borderRadius: 12, border: `1px solid ${T.border}`,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.14)",
+          overflow: "hidden", minWidth: 200, zIndex: 100,
+        }}>
+          <div style={{ padding: "8px 12px", borderBottom: `1px solid ${T.border}` }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, fontFamily: T.font, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              Basemap
+            </span>
+          </div>
+          {BASEMAP_OPTIONS.map(b => (
+            <button
+              key={b.id}
+              onClick={() => { setBasemap(b.id); setOpen(false); }}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 10,
+                padding: "9px 12px", background: (basemap ?? "dark") === b.id ? "rgba(37,99,235,0.07)" : "transparent",
+                border: "none", cursor: "pointer", fontFamily: T.font,
+              }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = T.hover}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = (basemap ?? "dark") === b.id ? "rgba(37,99,235,0.07)" : "transparent"}
+            >
+              <div style={{
+                width: 28, height: 20, borderRadius: 4, flexShrink: 0,
+                background: b.preview, border: `1px solid ${T.border}`,
+              }}/>
+              <span style={{ fontSize: 12, fontWeight: 500, color: T.text }}>{b.label}</span>
+              {(basemap ?? "dark") === b.id && (
+                <svg style={{ marginLeft: "auto" }} width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <path d="M2 8l4 4 8-8" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
   card:      "rgba(255,255,255,0.96)",
@@ -25,29 +127,52 @@ const T = {
   font:      "'Inter', -apple-system, system-ui, sans-serif",
 };
 
-// ─── Colour palettes ──────────────────────────────────────────────────────────
-const CAT_PALETTES: Record<string, string[]> = {
+
+// ─── Kepler-style palettes ────────────────────────────────────────────────────
+const KP_CAT: Record<string, string[]> = {
   "Felt":    ["#e63946","#f4a261","#2a9d8f","#457b9d","#8338ec","#fb5607","#3a86ff","#06d6a0","#ffbe0b","#ff006e"],
   "Tableau": ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac"],
   "QGIS":   ["#1f78b4","#33a02c","#e31a1c","#ff7f00","#6a3d9a","#b15928","#a6cee3","#b2df8a","#fb9a99","#fdbf6f"],
-  "Pastel":  ["#aec6cf","#ffb347","#b5ead7","#c7ceea","#ffdac1","#e2f0cb","#ff9aa2","#f8d9d9","#c4faf8","#dcd3ff"],
-  "Bold":    ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#999999","#66c2a5","#fc8d62"],
+  "Pastel": ["#aec6cf","#ffb347","#b5ead7","#c7ceea","#ffdac1","#e2f0cb","#ff9aa2","#f8d9d9","#c4faf8","#dcd3ff"],
+  "Bold":   ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#999999","#66c2a5","#fc8d62"],
 };
 
-const RAMP_PALETTES: Record<string, string[]> = {
-  "Blues":    ["#f7fbff","#c6dbef","#6baed6","#2171b5","#084594"],
-  "Greens":   ["#f7fcf5","#c7e9c0","#74c476","#238b45","#00441b"],
-  "Greys":    ["#ffffff","#d9d9d9","#969696","#525252","#000000"],
-  "Reds":     ["#fff5f0","#fcbba1","#fb6a4a","#cb181d","#67000d"],
-  "Viridis":  ["#fde725","#7ad151","#22a884","#2a788e","#414487","#440154"],
-  "Magma":    ["#fcfdbf","#feca8d","#fd9668","#de4968","#9b179e","#000004"],
-  "Inferno":  ["#fcffa4","#f7d13d","#fb9b06","#d44842","#8d0a6d","#000004"],
-  "Plasma":   ["#f0f921","#fca636","#e16462","#b12a90","#6a00a8","#0d0887"],
-  "Cividis":  ["#fde737","#9fda3a","#4ac16d","#1fa187","#277f8e","#365c8d","#46327e","#440154"],
-  "Spectral": ["#d53e4f","#f46d43","#fdae61","#ffffbf","#abdda4","#66c2a5","#3288bd"],
-  "RdYlGn":  ["#d73027","#f46d43","#fee08b","#d9ef8b","#66bd63","#1a9850"],
-  "Turbo":    ["#23171b","#4a58dd","#2af5b0","#a8fc3b","#fca50a","#bf3d1e"],
+const KP_SEQ: Record<string, string[]> = {
+  "Viridis": ["#fde725","#7ad151","#22a884","#2a788e","#414487","#440154"],
+  "Plasma":  ["#f0f921","#fca636","#e16462","#b12a90","#6a00a8","#0d0887"],
+  "Blues":   ["#dbeafe","#93c5fd","#3b82f6","#1d4ed8","#1e3a8a"],
+  "Greens":  ["#dcfce7","#86efac","#22c55e","#15803d","#14532d"],
+  "Oranges": ["#fff7ed","#fed7aa","#fb923c","#ea580c","#7c2d12"],
+  "Reds":    ["#fef2f2","#fca5a5","#ef4444","#b91c1c","#450a0a"],
+  "Purples": ["#f5f3ff","#c4b5fd","#8b5cf6","#6d28d9","#3b0764"],
+  "Turbo":   ["#23171b","#4a58dd","#2af5b0","#a8fc3b","#fca50a","#bf3d1e"],
+  "Spectral":["#d53e4f","#f46d43","#fdae61","#ffffbf","#abdda4","#66c2a5","#3288bd"],
+  "RdYlGn": ["#d73027","#f46d43","#fee08b","#d9ef8b","#66bd63","#1a9850"],
 };
+
+// ─── Colour palettes ──────────────────────────────────────────────────────────
+// const CAT_PALETTES: Record<string, string[]> = {
+//   "Felt":    ["#e63946","#f4a261","#2a9d8f","#457b9d","#8338ec","#fb5607","#3a86ff","#06d6a0","#ffbe0b","#ff006e"],
+//   "Tableau": ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac"],
+//   "QGIS":   ["#1f78b4","#33a02c","#e31a1c","#ff7f00","#6a3d9a","#b15928","#a6cee3","#b2df8a","#fb9a99","#fdbf6f"],
+//   "Pastel":  ["#aec6cf","#ffb347","#b5ead7","#c7ceea","#ffdac1","#e2f0cb","#ff9aa2","#f8d9d9","#c4faf8","#dcd3ff"],
+//   "Bold":    ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#999999","#66c2a5","#fc8d62"],
+// };
+
+// const RAMP_PALETTES: Record<string, string[]> = {
+//   "Blues":    ["#f7fbff","#c6dbef","#6baed6","#2171b5","#084594"],
+//   "Greens":   ["#f7fcf5","#c7e9c0","#74c476","#238b45","#00441b"],
+//   "Greys":    ["#ffffff","#d9d9d9","#969696","#525252","#000000"],
+//   "Reds":     ["#fff5f0","#fcbba1","#fb6a4a","#cb181d","#67000d"],
+//   "Viridis":  ["#fde725","#7ad151","#22a884","#2a788e","#414487","#440154"],
+//   "Magma":    ["#fcfdbf","#feca8d","#fd9668","#de4968","#9b179e","#000004"],
+//   "Inferno":  ["#fcffa4","#f7d13d","#fb9b06","#d44842","#8d0a6d","#000004"],
+//   "Plasma":   ["#f0f921","#fca636","#e16462","#b12a90","#6a00a8","#0d0887"],
+//   "Cividis":  ["#fde737","#9fda3a","#4ac16d","#1fa187","#277f8e","#365c8d","#46327e","#440154"],
+//   "Spectral": ["#d53e4f","#f46d43","#fdae61","#ffffbf","#abdda4","#66c2a5","#3288bd"],
+//   "RdYlGn":  ["#d73027","#f46d43","#fee08b","#d9ef8b","#66bd63","#1a9850"],
+//   "Turbo":    ["#23171b","#4a58dd","#2af5b0","#a8fc3b","#fca50a","#bf3d1e"],
+// };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function rgbToHex([r, g, b]: [number, number, number]) {
@@ -1042,10 +1167,11 @@ function NotesTab() {
 }
 
 // ─── Style Dialog ─────────────────────────────────────────────────────────────
+
 function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => void }) {
-  const { layers, datasets, updateLayer, setFilterRules } = useAppStore();
+  const { layers, datasets, updateLayer } = useAppStore();
   const [minimized, setMinimized] = useState(false);
-  const [tab, setTab] = useState<"style"|"symbology"|"filter">("style");
+  const [tab, setTab] = useState<"style"|"filter">("style");
   const layer = layers.find((l) => l.id === layerId);
   if (!layer) return null;
 
@@ -1055,10 +1181,10 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
     ds?.renderType === "point"   ? ["circle"] :
     ds?.renderType === "line"    ? ["line"] :
     ds?.renderType === "polygon" ? ["fill","line"] : ["circle","line","fill"];
-  const SWATCHES = ["#ef4444","#f97316","#eab308","#22c55e","#3b82f6","#8b5cf6","#ec4899","#14b8a6"];
 
   return (
     <Card style={{ width: 288 }}>
+      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <LayerSwatch type={layer.type} color={hex} size={16}/>
@@ -1079,121 +1205,531 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
 
       {!minimized && (
         <>
+          {/* Tabs — now just "style" and "filter" */}
           <div style={{ display: "flex", borderBottom: `1px solid ${T.border}` }}>
-            {(["style","symbology","filter"] as const).map((t) => (
+            {(["style","filter"] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)} style={{
                 flex: 1, padding: "8px 0", background: "none", border: "none", cursor: "pointer",
                 fontSize: 11, fontWeight: 600, fontFamily: T.font, textTransform: "capitalize",
                 color: tab === t ? T.text : T.textMuted,
                 borderBottom: `2px solid ${tab === t ? T.text : "transparent"}`,
                 marginBottom: -1, transition: "color 0.15s",
-              }}>{t}</button>
+              }}>{t === "style" ? "Style" : "Filter"}</button>
             ))}
           </div>
 
           {tab === "style" && (
-            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* Geometry type */}
-              {allowedTypes.length > 1 && (
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Geometry type</div>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    {(["fill","line"] as const).filter(t => allowedTypes.includes(t)).map((t) => (
-                      <button key={t} onClick={() => updateLayer(layer.id, { type: t })} style={{
-                        flex: 1, padding: "5px 0", borderRadius: 8, border: "none", cursor: "pointer",
-                        fontSize: 11, fontWeight: 600, fontFamily: T.font, textTransform: "capitalize",
-                        background: layer.type === t ? T.text : "rgba(0,0,0,0.05)",
-                        color: layer.type === t ? "white" : T.textMuted,
-                      }}>{t === "fill" ? "Fill" : "Line"}</button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {/* Outline colour — only for fill layers */}
-              {layer.type === "fill" && (
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Outline colour</span>
-                    <input
-                      type="color"
-                      value={(layer as any).strokeColor ?? hex}
-                      onChange={(e) => updateLayer(layer.id, { strokeColor: e.target.value } as any)}
-                      style={{ width: 32, height: 22, padding: 1, border: `1px solid ${T.border}`, borderRadius: 4, cursor: "pointer", background: "none" }}
-                    />
-                  </div>
-                </div>
-              )}
-              {/* Stroke width — only for line or fill-with-outline */}
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>
-                    {layer.type === "line" ? "Line width" : "Outline width"}
-                  </span>
-                  <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font }}>
-                    {(layer as any).strokeWidth ?? 1.5}px
-                  </span>
-                </div>
-                <input type="range" min={0.5} max={8} step={0.5}
-                  value={(layer as any).strokeWidth ?? 1.5}
-                  onChange={(e) => updateLayer(layer.id, { strokeWidth: Number(e.target.value) } as any)}
-                  style={{ width: "100%", accentColor: T.text }}
-                />
-              </div>
-              {/* Opacity */}
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Opacity</span>
-                  <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font }}>{Math.round(layer.opacity * 100)}%</span>
-                </div>
-                <input type="range" min={0} max={1} step={0.01} value={layer.opacity}
-                  onChange={(e) => updateLayer(layer.id, { opacity: Number(e.target.value) })}
-                  style={{ width: "100%", accentColor: T.text }}
-                />
-              </div>
-              {/* Preview */}
-              <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Preview</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: "rgba(0,0,0,0.03)", borderRadius: T.radiusSm }}>
-                  <LayerSwatch type={layer.type} color={hex} size={24}/>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: T.text, fontFamily: T.font }}>{layer.name}</div>
-                    <div style={{ fontSize: 11, color: T.textLight, fontFamily: T.font, textTransform: "capitalize" }}>{layer.type} · {Math.round(layer.opacity * 100)}% opacity</div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <LayerStylePanel
+              layer={layer}
+              updateLayer={updateLayer}
+              allowedTypes={allowedTypes}
+              ds={ds}
+            />
           )}
-
-          {tab === "symbology" && <SymbologyTab layer={layer} updateLayer={updateLayer}/>}
-          {tab === "filter"    && <FilterTab layer={layer} updateLayer={updateLayer}/>}
+          {tab === "filter" && <FilterTab layer={layer} updateLayer={updateLayer}/>}
         </>
       )}
     </Card>
   );
 }
 
-// ─── Symbology Tab ────────────────────────────────────────────────────────────
-const DISCRETE_PALETTES_V2: Record<string, string[]> = {
-  "Felt":      ["#e63946","#f4a261","#2a9d8f","#457b9d","#8338ec","#fb5607","#3a86ff","#06d6a0","#ffbe0b","#ff006e"],
-  "Tableau":   ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac"],
-  "QGIS":      ["#1f78b4","#33a02c","#e31a1c","#ff7f00","#6a3d9a","#b15928","#a6cee3","#b2df8a","#fb9a99","#fdbf6f"],
-  "Pastel":    ["#aec6cf","#ffb347","#b5ead7","#c7ceea","#ffdac1","#e2f0cb","#ff9aa2","#f8d9d9","#c4faf8","#dcd3ff"],
-  "Bold":      ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#999999","#66c2a5","#fc8d62"],
-  "Earthy":    ["#a0522d","#6b8e23","#4682b4","#d2691e","#708090","#556b2f","#8b4513","#2e8b57","#800000","#4169e1"],
-};
+// ─── Layer Style Panel (merged style + symbology, Kepler sections) ─────────────
+function LayerStylePanel({ layer, updateLayer, allowedTypes, ds }: {
+  layer: any; updateLayer: any; allowedTypes: string[]; ds: any;
+}) {
+  const hex = rgbToHex(layer.color);
+  const { datasets } = useAppStore();
+  const dataset = datasets.find((d: any) => d.id === layer.datasetId);
+  const isPoint = dataset?.renderType === "point";
 
-const CONTINUOUS_PALETTES_V2: Record<string, string[]> = {
-  "Blues":     ["#dbeafe","#93c5fd","#3b82f6","#1d4ed8","#1e3a8a"],
-  "Greens":    ["#dcfce7","#86efac","#22c55e","#15803d","#14532d"],
-  "Oranges":   ["#fff7ed","#fed7aa","#fb923c","#ea580c","#7c2d12"],
-  "Purples":   ["#f5f3ff","#c4b5fd","#8b5cf6","#6d28d9","#3b0764"],
-  "Reds":      ["#fef2f2","#fca5a5","#ef4444","#b91c1c","#450a0a"],
-  "Viridis":   ["#fde725","#7ad151","#22a884","#2a788e","#414487","#440154"],
-  "Plasma":    ["#f0f921","#fca636","#e16462","#b12a90","#6a00a8","#0d0887"],
-  "Magma":     ["#fcfdbf","#feca8d","#fd9668","#de4968","#9b179e","#000004"],
-  "Inferno":   ["#fcffa4","#f7d13d","#fb9b06","#d44842","#8d0a6d","#000004"],
-  "RdYlGn":    ["#d73027","#f46d43","#fee08b","#d9ef8b","#66bd63","#1a9850"],
-};
+  // Section open/close
+  const [openGeom,    setOpenGeom]    = useState(true);
+  const [openFill,    setOpenFill]    = useState(true);
+  const [openStroke,  setOpenStroke]  = useState(true);
+  const [openOpacity, setOpenOpacity] = useState(true);
+  const [openRadius,  setOpenRadius]  = useState(false);
+ 
+
+  // Stroke enabled toggle
+  const [strokeEnabled, setStrokeEnabled] = useState<boolean>((layer as any).strokeEnabled !== false);
+
+  // Stroke opacity
+  const [strokeOpacity, setStrokeOpacity] = useState<number>((layer as any).strokeOpacity ?? 1);
+
+  // Symbology state
+  const existing = layer.symbology;
+  const [mode, setMode]               = useState<"single"|"categorized"|"graduated">(existing?.mode ?? "single");
+  const [colorField, setColorField]   = useState<string>(existing?.col ?? "");
+  const [colorScale, setColorScale]   = useState<string>(existing?.scale ?? "quantile");
+  const [catPalette, setCatPalette]   = useState(existing?.palette ?? "Felt");
+  const [rampPalette, setRampPalette] = useState(existing?.palette ?? "Viridis");
+  const [inverted, setInverted]       = useState<boolean>(existing?.inverted ?? false);
+  const [catColorOverrides, setCatColorOverrides] = useState<Record<string,string>>({});
+  const [numClasses, setNumClasses]   = useState(5);
+  const [customBreaks, setCustomBreaks] = useState<number[] | null>(null);
+  const [columns, setColumns]         = useState<string[]>([]);
+  const [colValues, setColValues]     = useState<string[]>([]);
+  const [colLoading, setColLoading]   = useState(false);
+  const [numRange, setNumRange]       = useState<[number,number]>([0, 100]);
+  const [applied, setApplied]         = useState(false);
+
+  // Stroke color channel
+  const [strokeField, setStrokeField]   = useState<string>((layer as any).strokeSymbology?.col ?? "");
+  const [strokePalette, setStrokePalette] = useState<string>((layer as any).strokeSymbology?.palette ?? "Blues");
+  const [strokeInverted, setStrokeInverted] = useState(false);
+
+  // Radius channel
+  const [radiusField, setRadiusField] = useState<string>((layer.radiusChannel?.field) ?? "");
+  const [radiusScale, setRadiusScale] = useState("linear");
+  const [radiusMin, setRadiusMin]     = useState<number>((layer.radiusChannel?.range?.[0]) ?? 2);
+  const [radiusMax, setRadiusMax]     = useState<number>((layer.radiusChannel?.range?.[1]) ?? 20);
+
+  
+
+  const isNumericCol = colValues.length > 0 && colValues
+    .filter(v => v !== "" && v !== "No Data")
+    .every(v => Number.isFinite(Number(v)));
+  const numericVals  = colValues.map(Number).filter(Number.isFinite);
+  const autoBreaks   = numericVals.length >= 2 ? computeBreaks(numericVals, numClasses, colorScale as any) : [];
+  const activeBreaks = customBreaks ?? autoBreaks;
+  const catColors    = KP_CAT[catPalette] ?? Object.values(KP_CAT)[0];
+
+  useEffect(() => {
+    if (!dataset?.id) return;
+    setColLoading(true);
+    fetch(`${API}/datasets/${dataset.id}/columns`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          const cols = (data.columns as string[]).filter((c: string) => c !== "dataset_id" && c !== "_fid");
+          setColumns(cols);
+          if (!colorField && cols.length) setColorField(cols[0]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setColLoading(false));
+  }, [dataset?.id]);
+
+  useEffect(() => {
+    if (!dataset?.id || !colorField) return;
+    fetch(`${API}/datasets/${dataset.id}/column-values/${encodeURIComponent(colorField)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          const vals = (data.values ?? []).map((v: any) =>
+            v.value === null || v.value === undefined ? "" : String(v.value)
+          );
+          setColValues(vals);
+          const nums = vals.map(Number).filter(Number.isFinite);
+          if (nums.length) setNumRange([Math.min(...nums), Math.max(...nums)]);
+        }
+      })
+      .catch(() => setColValues([]));
+  }, [dataset?.id, colorField]);
+
+  useEffect(() => {
+    if (mode === "graduated" && colValues.length > 0 && !isNumericCol) setMode("categorized");
+  }, [colValues, mode]);
+
+  function applyAll() {
+    // Symbology
+    if (mode === "single") {
+      updateLayer(layer.id, { symbology: { mode: "single" } });
+    } else if (mode === "categorized") {
+      const base = KP_CAT[catPalette] ?? Object.values(KP_CAT)[0];
+      const colors = colValues.map((v, i) => catColorOverrides[v] ?? base[i % base.length]);
+      updateLayer(layer.id, { symbology: { mode: "categorized", col: colorField, palette: catPalette, colors, values: colValues } });
+    } else if (mode === "graduated") {
+      const breaks = activeBreaks.length >= 2 ? activeBreaks : [numRange[0], numRange[1]];
+      const ramp = KP_SEQ[rampPalette] ?? Object.values(KP_SEQ)[0];
+      const pal = inverted ? [...ramp].reverse() : ramp;
+      const colors = Array.from({ length: breaks.length - 1 }, (_, i) => {
+        const t = (breaks.length - 1) === 1 ? 0 : i / (breaks.length - 2);
+        return pal[Math.round(t * (pal.length - 1))];
+      });
+      updateLayer(layer.id, { symbology: { mode: "graduated", col: colorField, palette: rampPalette, colors, breaks, min: breaks[0], max: breaks[breaks.length - 1], scale: colorScale as any, inverted } });
+    }
+
+    // Stroke symbology (data-driven stroke color)
+    if (strokeField && strokeEnabled) {
+      const ramp = KP_SEQ[strokePalette] ?? Object.values(KP_SEQ)[0];
+      const pal = strokeInverted ? [...ramp].reverse() : ramp;
+      updateLayer(layer.id, { strokeSymbology: { col: strokeField, palette: strokePalette, colors: pal } } as any);
+    } else {
+      updateLayer(layer.id, { strokeSymbology: null } as any);
+    }
+
+    // Stroke props
+    updateLayer(layer.id, {
+      strokeEnabled,
+      strokeOpacity,
+    } as any);
+
+    // Radius
+    if (isPoint) {
+      updateLayer(layer.id, {
+        radiusChannel: radiusField
+          ? { field: radiusField, scale: radiusScale as any, range: [radiusMin, radiusMax] }
+          : null,
+      });
+    }
+
+    setApplied(true);
+    setTimeout(() => setApplied(false), 1500);
+  }
+
+  
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 160px)" }}>
+      <div style={{ overflowY: "auto", flex: 1 }}>
+
+        {/* ── GEOMETRY TYPE ── */}
+        {allowedTypes.length > 1 && (
+          <>
+            <SectionHeader label="Geometry" open={openGeom} onToggle={() => setOpenGeom(o => !o)} />
+            {openGeom && (
+              <div style={{ padding: "12px 16px" }}>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {(["fill","line"] as const).filter(t => allowedTypes.includes(t)).map((t) => (
+                    <button key={t} onClick={() => updateLayer(layer.id, { type: t })} style={{
+                      flex: 1, padding: "5px 0", borderRadius: 6, border: "none", cursor: "pointer",
+                      fontSize: 11, fontWeight: 700, fontFamily: T.font,
+                      background: layer.type === t ? "#18181b" : "rgba(0,0,0,0.05)",
+                      color: layer.type === t ? "white" : T.textMuted,
+                    }}>
+                      {t === "fill" ? "Fill" : "Line"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── FILL COLOR ── */}
+        <SectionHeader
+          label="Fill Color"
+          open={openFill}
+          onToggle={() => setOpenFill(o => !o)}
+          rightSlot={
+            <Toggle
+              checked={openFill}
+              onChange={(v) => {
+                setOpenFill(v);
+                updateLayer(layer.id, { fillEnabled: v } as any);
+              }}
+            />
+          }
+        />
+        {openFill && (
+          <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* Mode pills */}
+            <div style={{ display: "flex", gap: 3 }}>
+              {(["single","categorized","graduated"] as const).map((m) => {
+                if (m === "graduated" && !isNumericCol && colValues.length > 0) return null;
+                return (
+                  <button key={m} onClick={() => setMode(m)} style={{
+                    flex: 1, padding: "5px 0", borderRadius: 6, border: "none", cursor: "pointer",
+                    fontSize: 10, fontWeight: 700, fontFamily: T.font,
+                    background: mode === m ? "#18181b" : "rgba(0,0,0,0.05)",
+                    color: mode === m ? "white" : T.textMuted,
+                    transition: "background 0.15s",
+                  }}>
+                    {m === "single" ? "Single" : m === "categorized" ? "Categorical" : "Sequential"}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Single */}
+            {mode === "single" && (
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                {["#ef4444","#f97316","#eab308","#22c55e","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f59e0b","#64748b","#1e293b","#ffffff"].map(c => (
+                  <button key={c} onClick={() => updateLayer(layer.id, { color: hexToRgb(c) })} style={{
+                    width: 22, height: 22, borderRadius: "50%", border: "1.5px solid rgba(0,0,0,0.1)",
+                    cursor: "pointer", background: c, padding: 0,
+                    outline: rgbToHex(layer.color) === c ? `2px solid ${c}` : "2px solid transparent",
+                    outlineOffset: 2,
+                  }}/>
+                ))}
+                <label style={{ width: 22, height: 22, borderRadius: "50%", border: `1.5px dashed ${T.border}`, cursor: "pointer", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: 13, color: T.textMuted, lineHeight: 1 }}>+</span>
+                  <input type="color" value={hex}
+                    onChange={e => updateLayer(layer.id, { color: hexToRgb(e.target.value) })}
+                    style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer" }}
+                  />
+                </label>
+              </div>
+            )}
+
+            {/* Categorized */}
+            {mode === "categorized" && (
+              <>
+                <FieldRow label="Field" columns={columns} colLoading={colLoading} value={colorField} onChange={setColorField} />
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  {Object.entries(KP_CAT).map(([name, cols]) => (
+                    <div key={name} onClick={() => setCatPalette(name)} style={{
+                      display: "flex", alignItems: "center", gap: 8, padding: "4px 8px",
+                      borderRadius: 6, cursor: "pointer",
+                      background: catPalette === name ? "rgba(37,99,235,0.07)" : "transparent",
+                      border: `1px solid ${catPalette === name ? T.accent : "transparent"}`,
+                    }}>
+                      <span style={{ width: 40, fontSize: 10, fontWeight: 600, color: T.textMuted, fontFamily: T.font }}>{name}</span>
+                      <div style={{ display: "flex", gap: 2 }}>
+                        {cols.slice(0, 8).map((c, i) => <div key={i} style={{ width: 11, height: 11, borderRadius: 2, background: c }}/>)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {colValues.length > 0 && (
+                  <div style={{ maxHeight: 140, overflowY: "auto", scrollbarWidth: "thin", display: "flex", flexDirection: "column", gap: 3 }}>
+                    {colValues.map((val, i) => {
+                      const cur = catColorOverrides[val] ?? catColors[i % catColors.length];
+                      return (
+                        <div key={val} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <label style={{ width: 14, height: 14, borderRadius: 3, background: cur, flexShrink: 0, cursor: "pointer", border: "1px solid rgba(0,0,0,0.12)", position: "relative" }}>
+                            <input type="color" value={cur}
+                              onChange={e => setCatColorOverrides(p => ({ ...p, [val]: e.target.value }))}
+                              style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer", top: 0, left: 0 }}
+                            />
+                          </label>
+                          <span style={{ fontSize: 11, color: val === "" ? T.textLight : T.text, fontFamily: T.font, fontStyle: val === "" ? "italic" : "normal" }}>
+                            {val === "" ? "No Data" : val}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Graduated */}
+            {mode === "graduated" && (
+              <>
+                <FieldRow
+                  label="Field" columns={columns} colLoading={colLoading}
+                  value={colorField} onChange={v => { setColorField(v); setCustomBreaks(null); }}
+                  scales={CLASS_SCALES} activeScale={colorScale} onScaleChange={s => { setColorScale(s); setCustomBreaks(null); }}
+                />
+                <PaletteBar palettes={KP_SEQ} selected={rampPalette} onSelect={setRampPalette} inverted={inverted} onInvert={() => setInverted(v => !v)} />
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font, whiteSpace: "nowrap" }}>Classes</span>
+                  <input type="range" min={2} max={8} step={1} value={numClasses}
+                    onChange={e => { setNumClasses(Number(e.target.value)); setCustomBreaks(null); }}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 14, textAlign: "center" }}>{numClasses}</span>
+                </div>
+                {activeBreaks.length >= 2 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    {activeBreaks.slice(0, -1).map((brk, i) => {
+                      const ramp = KP_SEQ[rampPalette] ?? Object.values(KP_SEQ)[0];
+                      const pal = inverted ? [...ramp].reverse() : ramp;
+                      const t = (activeBreaks.length - 2) === 0 ? 0 : i / (activeBreaks.length - 2);
+                      const swatch = pal[Math.round(t * (pal.length - 1))];
+                      return (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ width: 12, height: 12, borderRadius: 2, background: swatch, flexShrink: 0, border: "1px solid rgba(0,0,0,0.1)" }}/>
+                          <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>
+                            {brk.toFixed(2)} – {activeBreaks[i + 1].toFixed(2)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── OUTLINE ── */}
+        {layer.type !== "circle" && (
+          <>
+            <SectionHeader
+              label="Outline"
+              open={openStroke}
+              onToggle={() => setOpenStroke(o => !o)}
+              rightSlot={
+                <Toggle
+                  checked={strokeEnabled}
+                  onChange={(v) => {
+                    setStrokeEnabled(v);
+                    updateLayer(layer.id, { strokeEnabled: v } as any);
+                  }}
+                />
+              }
+            />
+            {openStroke && strokeEnabled && (
+              <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+
+                {/* Stroke color — constant or data-driven */}
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>
+                    Stroke color based on
+                  </div>
+                  <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
+                    <button onClick={() => setStrokeField("")} style={{
+                      flex: 1, padding: "4px 0", borderRadius: 6, border: "none", cursor: "pointer",
+                      fontSize: 10, fontWeight: 700, fontFamily: T.font,
+                      background: !strokeField ? "#18181b" : "rgba(0,0,0,0.05)",
+                      color: !strokeField ? "white" : T.textMuted,
+                    }}>Constant</button>
+                    <button onClick={() => strokeField || (columns.length && setStrokeField(columns[0]))} style={{
+                      flex: 1, padding: "4px 0", borderRadius: 6, border: "none", cursor: "pointer",
+                      fontSize: 10, fontWeight: 700, fontFamily: T.font,
+                      background: strokeField ? "#18181b" : "rgba(0,0,0,0.05)",
+                      color: strokeField ? "white" : T.textMuted,
+                    }}>Field</button>
+                  </div>
+
+                  {!strokeField ? (
+                    /* Constant colour swatch + picker */
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <label style={{ width: 28, height: 28, borderRadius: 6, background: (layer as any).strokeColor ?? hex, border: `1.5px solid ${T.border}`, cursor: "pointer", position: "relative", flexShrink: 0 }}>
+                        <input type="color" value={(layer as any).strokeColor ?? hex}
+                          onChange={e => updateLayer(layer.id, { strokeColor: e.target.value } as any)}
+                          style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer", top: 0, left: 0 }}
+                        />
+                      </label>
+                      <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>
+                        {((layer as any).strokeColor ?? hex).toUpperCase()}
+                      </span>
+                    </div>
+                  ) : (
+                    /* Data-driven stroke */
+                    <>
+                      <FieldRow label="Field" columns={columns} colLoading={colLoading} value={strokeField} onChange={setStrokeField} />
+                      <PaletteBar palettes={KP_SEQ} selected={strokePalette} onSelect={setStrokePalette} inverted={strokeInverted} onInvert={() => setStrokeInverted(v => !v)} />
+                    </>
+                  )}
+                </div>
+
+                {/* Width */}
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>Width</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font }}>{(layer as any).strokeWidth ?? 1.5}px</span>
+                  </div>
+                  <input type="range" min={0.5} max={10} step={0.5}
+                    value={(layer as any).strokeWidth ?? 1.5}
+                    onChange={e => updateLayer(layer.id, { strokeWidth: Number(e.target.value) } as any)}
+                    style={{ width: "100%", accentColor: T.text }}
+                  />
+                </div>
+
+                {/* Stroke opacity */}
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>Opacity</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font }}>{Math.round(strokeOpacity * 100)}%</span>
+                  </div>
+                  <input type="range" min={0} max={1} step={0.01}
+                    value={strokeOpacity}
+                    onChange={e => {
+                      const v = Number(e.target.value);
+                      setStrokeOpacity(v);
+                      // live update — no Apply needed
+                      updateLayer(layer.id, { strokeOpacity: v } as any);
+                    }}
+                    style={{ width: "100%", accentColor: T.text }}
+                  />
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── RADIUS (points) ── */}
+        {isPoint && (
+          <>
+            <SectionHeader label="Radius" open={openRadius} onToggle={() => setOpenRadius(o => !o)} />
+            {openRadius && (
+              <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+                <FieldRow
+                  label="Field" columns={columns} colLoading={colLoading}
+                  value={radiusField} onChange={setRadiusField}
+                  scales={[{ key: "linear", label: "Linear" }, { key: "sqrt", label: "Sqrt" }, { key: "log", label: "Log" }]}
+                  activeScale={radiusScale} onScaleChange={setRadiusScale}
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Min px</div>
+                    <input type="number" min={1} max={50} value={radiusMin} onChange={e => setRadiusMin(Number(e.target.value))}
+                      style={{ width: "100%", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", boxSizing: "border-box" as const }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Max px</div>
+                    <input type="number" min={1} max={200} value={radiusMax} onChange={e => setRadiusMax(Number(e.target.value))}
+                      style={{ width: "100%", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", boxSizing: "border-box" as const }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── FILL OPACITY ── */}
+        <SectionHeader label="Opacity" open={openOpacity} onToggle={() => setOpenOpacity(o => !o)} />
+        {openOpacity && (
+          <div style={{ padding: "12px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="range" min={0} max={1} step={0.01} value={layer.opacity}
+                onChange={e => updateLayer(layer.id, { opacity: Number(e.target.value) })}
+                style={{ flex: 1, accentColor: T.text }}
+              />
+              <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 34, textAlign: "right" }}>
+                {Math.round(layer.opacity * 100)}%
+              </span>
+            </div>
+          </div>
+        )}
+
+
+
+      </div>
+
+      {/* ── Apply ── */}
+      <div style={{ padding: "12px 16px", borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+        <button onClick={applyAll} style={{
+          width: "100%", padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
+          fontSize: 12, fontWeight: 700, fontFamily: T.font,
+          background: applied ? T.green : T.accent, color: "white",
+          transition: "background 0.2s",
+        }}>
+          {applied ? "✓ Applied" : "Apply"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// // ─── Symbology Tab ────────────────────────────────────────────────────────────
+// const DISCRETE_PALETTES_V2: Record<string, string[]> = {
+//   "Felt":      ["#e63946","#f4a261","#2a9d8f","#457b9d","#8338ec","#fb5607","#3a86ff","#06d6a0","#ffbe0b","#ff006e"],
+//   "Tableau":   ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac"],
+//   "QGIS":      ["#1f78b4","#33a02c","#e31a1c","#ff7f00","#6a3d9a","#b15928","#a6cee3","#b2df8a","#fb9a99","#fdbf6f"],
+//   "Pastel":    ["#aec6cf","#ffb347","#b5ead7","#c7ceea","#ffdac1","#e2f0cb","#ff9aa2","#f8d9d9","#c4faf8","#dcd3ff"],
+//   "Bold":      ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#999999","#66c2a5","#fc8d62"],
+//   "Earthy":    ["#a0522d","#6b8e23","#4682b4","#d2691e","#708090","#556b2f","#8b4513","#2e8b57","#800000","#4169e1"],
+// };
+
+// const CONTINUOUS_PALETTES_V2: Record<string, string[]> = {
+//   "Blues":     ["#dbeafe","#93c5fd","#3b82f6","#1d4ed8","#1e3a8a"],
+//   "Greens":    ["#dcfce7","#86efac","#22c55e","#15803d","#14532d"],
+//   "Oranges":   ["#fff7ed","#fed7aa","#fb923c","#ea580c","#7c2d12"],
+//   "Purples":   ["#f5f3ff","#c4b5fd","#8b5cf6","#6d28d9","#3b0764"],
+//   "Reds":      ["#fef2f2","#fca5a5","#ef4444","#b91c1c","#450a0a"],
+//   "Viridis":   ["#fde725","#7ad151","#22a884","#2a788e","#414487","#440154"],
+//   "Plasma":    ["#f0f921","#fca636","#e16462","#b12a90","#6a00a8","#0d0887"],
+//   "Magma":     ["#fcfdbf","#feca8d","#fd9668","#de4968","#9b179e","#000004"],
+//   "Inferno":   ["#fcffa4","#f7d13d","#fb9b06","#d44842","#8d0a6d","#000004"],
+//   "RdYlGn":    ["#d73027","#f46d43","#fee08b","#d9ef8b","#66bd63","#1a9850"],
+// };
 
 
 // ─── Classification methods ───────────────────────────────────────────────────
@@ -1269,350 +1805,537 @@ function computeBreaks(nums: number[], n: number, method: ClassMethod): number[]
   return [];
 }
 
-// ─── Symbology Tab ────────────────────────────────────────────────────────────
-function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
-  const { datasets } = useAppStore();
-  const dataset = datasets.find((d) => d.id === layer.datasetId);
-  const isPoint = dataset?.renderType === "point";
 
-  const existing = layer.symbology;
-  const [mode, setMode]               = useState<"single"|"categorized"|"graduated">(existing?.mode ?? "single");
-  const [attrCol, setAttrCol]         = useState(existing?.col ?? "");
-  const [catPalette, setCatPalette]   = useState(existing?.palette ?? "Felt");
-  const [rampPalette, setRampPalette] = useState(existing?.palette ?? "Viridis");
-  const [columns, setColumns]         = useState<string[]>([]);
-  const [colValues, setColValues]     = useState<string[]>([]);
-  
-  // per-item colour overrides for categorized; key = value string, value = hex colour
-  const [catColorOverrides, setCatColorOverrides] = useState<Record<string,string>>({});
-  const [colLoading, setColLoading]   = useState(false);
-  const [applied, setApplied]         = useState(false);
-  const [numClasses, setNumClasses]   = useState(5);
-  const [classMethod, setClassMethod] = useState<ClassMethod>("equalInterval");
-  // customBreaks: array of n+1 boundary values, editable by user; null = auto-computed
-  const [customBreaks, setCustomBreaks] = useState<number[] | null>(null);
-  const [inverted, setInverted] = useState(false);
-  
-
-  // true when every non-empty value in the column parses as a finite number
-  const isNumericCol = colValues.length > 0 && colValues
-    .filter(v => v !== "" && v !== "No Data")
-    .every(v => Number.isFinite(Number(v)));
-  // numeric range for graduated
-  const [numRange, setNumRange]       = useState<[number,number]>([0, 100]);
-
-  // Numeric values for break computation
-  const numericVals = colValues.map(Number).filter(Number.isFinite);
-  const autoBreaks = numericVals.length >= 2
-    ? computeBreaks(numericVals, numClasses, classMethod)
-    : [];
-  const activeBreaks = customBreaks ?? autoBreaks;
-  useEffect(() => {
-    if (!dataset?.id) return;
-    setColLoading(true);
-    fetch(`${API}/datasets/${dataset.id}/columns`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.ok) {
-          const cols = (data.columns as string[]).filter((c) => c !== "dataset_id" && c !== "_fid");
-          setColumns(cols);
-          if (!attrCol && cols.length > 0) setAttrCol(cols[0]);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setColLoading(false));
-  }, [dataset?.id]);
-
-  // AFTER — remove the mode === "single" guard so values load eagerly
-  useEffect(() => {
-    if (!dataset?.id || !attrCol) return;
-    fetch(`${API}/datasets/${dataset.id}/column-values/${encodeURIComponent(attrCol)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.ok) {
-          const vals = (data.values ?? []).map((v: any) => {
-            const s = v.value === null || v.value === undefined ? "" : String(v.value);
-            return s;
-          });
-          setColValues(vals);
-          const nums = vals.map(Number).filter(Number.isFinite);
-          if (nums.length) setNumRange([Math.min(...nums), Math.max(...nums)]);
-        }
-      })
-      .catch(() => setColValues([]));
-  }, [dataset?.id, attrCol]); // removed `mode` from deps
-
-  // Auto-switch away from graduated if column is non-numeric
-  useEffect(() => {
-    if (mode === "graduated" && colValues.length > 0) {
-      const numeric = colValues.filter(v => v !== "" && v !== "No Data").every(v => Number.isFinite(Number(v)));
-      if (!numeric) setMode("categorized");
-    }
-  }, [colValues, mode]);
-        
-
-  function applySymbology() {
-    if (mode === "single") {
-      updateLayer(layer.id, { symbology: { mode: "single" } });
-    } else if (mode === "categorized") {
-      // merge palette defaults with any per-item overrides
-      const basePalette = CAT_PALETTES[catPalette];
-      const finalColors = colValues.map((val, i) =>
-        catColorOverrides[val] ?? basePalette[i % basePalette.length]
-      );
-      updateLayer(layer.id, { symbology: { mode: "categorized", col: attrCol, palette: catPalette, colors: finalColors, values: colValues } });
-    } else if (mode === "graduated") {
-      const breaks = activeBreaks.length >= 2 ? activeBreaks : [numRange[0], numRange[1]];
-      const palette = inverted ? [...rampColors].reverse() : rampColors;
-      const classColors = Array.from({ length: breaks.length - 1 }, (_, i) => {
-        const t = (breaks.length - 1) === 1 ? 0 : i / (breaks.length - 2);
-        return palette[Math.round(t * (palette.length - 1))];
-      });
-      updateLayer(layer.id, { symbology: {
-        mode: "graduated", col: attrCol, palette: rampPalette,
-        colors: classColors, breaks, min: breaks[0], max: breaks[breaks.length - 1],
-      }});
-    }
-    setApplied(true);
-    setTimeout(() => setApplied(false), 1500);
-  }
-
-  const catColors = CAT_PALETTES[catPalette];
-  const rampColors = RAMP_PALETTES[rampPalette];
-
+// ─── Kepler-style Section Header (collapsible) ────────────────────────────────
+function SectionHeader({
+  label, open, onToggle, rightSlot,
+}: { label: string; open: boolean; onToggle: () => void; rightSlot?: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 180px)" }}>
-    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto", flex: 1 }}>
-      <div>
-        <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Symbol type</div>
-        <div style={{ display: "flex", gap: 4 }}>
-          {(["single","categorized","graduated"] as const).filter(m => {
-            if (m === "graduated" && isPoint) return false;
-            if (m === "graduated" && !isNumericCol) return false;
-            return true;
-          }).map((m) => (
-            <button key={m} onClick={() => setMode(m)} style={{
-              flex: 1, padding: "5px 0", borderRadius: 8, border: "none", cursor: "pointer",
-              fontSize: 11, fontWeight: 600, fontFamily: T.font, textTransform: "capitalize",
-              background: mode === m ? T.text : "rgba(0,0,0,0.05)",
-              color: mode === m ? "white" : T.textMuted,
-            }}>{m === "single" ? "Single" : m === "categorized" ? "Categorized" : "Graduated"}</button>
-          ))}
-        </div>
+    <div
+      onClick={onToggle}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "9px 16px", cursor: "pointer", userSelect: "none",
+        borderBottom: `1px solid ${T.border}`,
+        background: "rgba(0,0,0,0.02)",
+      }}
+    >
+      <span style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, fontFamily: T.font, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        {label}
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {rightSlot}
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+          style={{ transition: "transform 0.2s", transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
+          <path d="M2 4l4 4 4-4" stroke={T.textMuted} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
       </div>
-
-      {mode === "single" && (
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 8 }}>Colour</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {["#ef4444","#f97316","#eab308","#22c55e","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f59e0b","#64748b"].map((c) => (
-              <button key={c} onClick={() => updateLayer(layer.id, { color: hexToRgb(c) })} style={{
-                width: 26, height: 26, borderRadius: "50%", border: "none", cursor: "pointer",
-                background: c, padding: 0,
-                outline: rgbToHex(layer.color) === c ? `3px solid ${c}` : "2px solid transparent",
-                outlineOffset: 2, transition: "transform 0.1s",
-                transform: rgbToHex(layer.color) === c ? "scale(1.2)" : "scale(1)",
-              }}/>
-            ))}
-            <label style={{ width: 26, height: 26, borderRadius: "50%", border: "2px dashed #ccc", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#aaa", flexShrink: 0 }}
-              title="Custom colour">
-              +
-              <input type="color" value={rgbToHex(layer.color)}
-                onChange={(e) => updateLayer(layer.id, { color: hexToRgb(e.target.value) })}
-                style={{ position: "absolute", opacity: 0, width: 0, height: 0 }}/>
-            </label>
-          </div>
-        </div>
-      )}
-
-      {mode !== "single" && (
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Value column</div>
-          {colLoading
-            ? <div style={{ fontSize: 12, color: T.textLight, fontFamily: T.font }}>Loading…</div>
-            : <select value={attrCol} onChange={(e) => setAttrCol(e.target.value)} style={{ width: "100%", padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${T.border}`, fontSize: 13, fontFamily: T.font, background: "white", color: T.text, outline: "none", cursor: "pointer" }}>
-                {columns.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-          }
-        </div>
-      )}
-
-      {mode === "categorized" && (
-        <>
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Colour palette</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {Object.entries(CAT_PALETTES).map(([name, colors]) => (
-                <button key={name} onClick={() => setCatPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${catPalette === name ? T.accent : T.border}`, background: catPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 52, textAlign: "left" }}>{name}</span>
-                  <div style={{ display: "flex", gap: 2 }}>
-                    {colors.map((c, i) => <div key={i} style={{ width: 13, height: 13, borderRadius: 3, background: c }}/>)}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-          {colValues.length > 0 && (
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Legend preview <span style={{ fontSize: 10, color: T.textLight }}>(click swatch to edit colour)</span></div>
-              <div style={{ maxHeight: 180, overflowY: "auto", scrollbarWidth: "thin", display: "flex", flexDirection: "column", gap: 4 }}>
-                {colValues.map((val, i) => {
-                  const displayLabel = val === "" || val === null ? "No Data" : val;
-                  const currentColor = catColorOverrides[val] ?? catColors[i % catColors.length];
-                  return (
-                    <div key={val} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <label style={{ position: "relative", width: 18, height: 18, borderRadius: 4, background: currentColor, flexShrink: 0, cursor: "pointer", border: "1.5px solid rgba(0,0,0,0.15)", display: "block" }}>
-                        <input type="color" value={currentColor} onChange={(e) => setCatColorOverrides(prev => ({ ...prev, [val]: e.target.value }))}
-                          style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer", top: 0, left: 0 }}
-                        />
-                      </label>
-                      <span style={{ fontSize: 11, color: val === "" ? T.textLight : T.text, fontFamily: T.font, fontStyle: val === "" ? "italic" : "normal" }}>
-                        {displayLabel}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {mode === "graduated" && (
-        <>
-          {/* Colour ramp */}
-          <div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Colour ramp</span>
-              <button
-                onClick={() => setInverted(!inverted)}
-                title="Invert ramp"
-                style={{
-                  display: "flex", alignItems: "center", gap: 4,
-                  padding: "2px 8px", borderRadius: 6, border: `1px solid ${T.border}`,
-                  background: inverted ? T.text : "transparent",
-                  color: inverted ? "white" : T.textMuted,
-                  cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: T.font,
-                  transition: "background 0.12s, color 0.12s",
-                }}
-              >
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                  <path d="M1 8h14M10 4l4 4-4 4M6 4L2 8l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                Invert
-              </button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {Object.entries(RAMP_PALETTES).map(([name, colors]) => (
-                <button key={name} onClick={() => setRampPalette(name)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${rampPalette === name ? T.accent : T.border}`, background: rampPalette === name ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer" }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 52, textAlign: "left" }}>{name}</span>
-                  <div style={{ flex: 1, height: 14, borderRadius: 4, background: inverted
-                    ? `linear-gradient(to right, ${colors[colors.length-1]}, ${colors[Math.floor(colors.length/2)]}, ${colors[0]})`
-                    : `linear-gradient(to right, ${colors[0]}, ${colors[Math.floor(colors.length/2)]}, ${colors[colors.length-1]})`
-                  }}/>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Classification method */}
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font, marginBottom: 6 }}>Classification method</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {([
-                ["equalInterval", "Equal Interval"],
-                ["quantile",      "Quantile"],
-                ["naturalBreaks", "Natural Breaks (Jenks)"],
-                ["stdDev",        "Standard Deviation"],
-              ] as [ClassMethod, string][]).map(([val, label]) => (
-                <button key={val} onClick={() => { setClassMethod(val); setCustomBreaks(null); }}
-                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, border: `2px solid ${classMethod === val ? T.accent : T.border}`, background: classMethod === val ? "rgba(37,99,235,0.06)" : "white", cursor: "pointer", textAlign: "left" }}>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${classMethod === val ? T.accent : T.border}`, background: classMethod === val ? T.accent : "white", flexShrink: 0 }}/>
-                  <span style={{ fontSize: 11, fontWeight: classMethod === val ? 600 : 400, color: T.text, fontFamily: T.font }}>{label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Classes slider */}
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Classes</span>
-              <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.font }}>{numClasses}</span>
-            </div>
-            <input type="range" min={2} max={9} step={1}
-              value={numClasses}
-              onChange={(e) => { setNumClasses(Number(e.target.value)); setCustomBreaks(null); }}
-              style={{ width: "100%", accentColor: T.text }}
-            />
-          </div>
-
-          {/* Legend preview with editable breaks */}
-          {activeBreaks.length >= 2 && (
-            <div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 500, color: T.textMuted, fontFamily: T.font }}>Legend preview</span>
-                <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.font }}>(edit boundaries)</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                {Array.from({ length: activeBreaks.length - 1 }, (_, i) => {
-                  const lo = activeBreaks[i];
-                  const hi = activeBreaks[i + 1];
-                  const colorIdx = Math.round((i / (activeBreaks.length - 2 || 1)) * (rampColors.length - 1));
-                  const swatchColor = rampColors[colorIdx];
-                  return (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ width: 18, height: 18, borderRadius: 3, background: swatchColor, flexShrink: 0, border: "1px solid rgba(0,0,0,0.1)" }} />
-                      {/* Lower bound — editable for all rows except first */}
-                      {i === 0 ? (
-                        <span style={{ fontSize: 11, color: T.textLight, fontFamily: T.font, width: 60, textAlign: "right" }}>{lo.toFixed(1)}</span>
-                      ) : (
-                        <input
-                          type="text"
-                          key={`break-${i}-${(customBreaks ?? autoBreaks)[i]}`}
-                          defaultValue={String((customBreaks ?? autoBreaks)[i].toFixed(1))}
-                          onBlur={(e) => {
-                            const val = Number(e.target.value.replace(/[^0-9.\-]/g, ""));
-                            if (!Number.isFinite(val)) return;
-                            const next = [...(customBreaks ?? autoBreaks)];
-                            next[i] = val;
-                            setCustomBreaks(next);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                          }}
-                          style={{ width: 64, fontSize: 11, fontFamily: T.font, border: `1px solid ${T.border}`, borderRadius: 4, padding: "2px 6px", textAlign: "right", color: T.text, outline: "none", background: "white" }}
-                        />
-                      )}
-                      <span style={{ fontSize: 11, color: T.textLight, fontFamily: T.font }}>–</span>
-                      <span style={{ fontSize: 11, color: T.text, fontFamily: T.font }}>{hi.toFixed(1)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-              {customBreaks && (
-                <button onClick={() => setCustomBreaks(null)}
-                  style={{ marginTop: 6, fontSize: 10, color: T.accent, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: T.font, textDecoration: "underline" }}>
-                  Reset to {classMethod === "equalInterval" ? "equal interval" : classMethod === "quantile" ? "quantile" : classMethod === "naturalBreaks" ? "natural breaks" : "std dev"} breaks
-                </button>
-              )}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-    <div style={{ padding: "12px 16px", borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
-      <button onClick={applySymbology} style={{
-        width: "100%", padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
-        fontSize: 12, fontWeight: 600, fontFamily: T.font,
-        background: applied ? T.green : T.accent, color: "white",
-      }}>
-        {applied ? "✓ Applied" : "Apply symbology"}
-      </button>
-    </div>
     </div>
   );
 }
+
+// ─── Gradient bar palette picker (Kepler style) ───────────────────────────────
+function PaletteBar({
+  palettes, selected, onSelect, inverted, onInvert,
+}: {
+  palettes: Record<string, string[]>;
+  selected: string;
+  onSelect: (name: string) => void;
+  inverted?: boolean;
+  onInvert?: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const colors = palettes[selected] ?? Object.values(palettes)[0];
+  const displayed = inverted ? [...colors].reverse() : colors;
+
+  // ── ADD THESE TWO ──────────────────────────────────────────────────────────
+  const dropRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+  // ──────────────────────────────────────────────────────────────────────────
+
+  return (
+    <div ref={dropRef} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {/* Gradient bar — click to open picker */}
+        <div
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            flex: 1, height: 20, borderRadius: 4, cursor: "pointer",
+            background: `linear-gradient(to right, ${displayed.join(", ")})`,
+            border: `1px solid ${T.border}`,
+            boxShadow: "inset 0 1px 2px rgba(0,0,0,0.08)",
+          }}
+        />
+        {onInvert && (
+          <button
+            onClick={onInvert}
+            title="Reverse palette"
+            style={{
+              padding: "3px 7px", borderRadius: 6, border: `1px solid ${T.border}`,
+              background: inverted ? T.accent : "white", color: inverted ? "white" : T.textMuted,
+              cursor: "pointer", fontSize: 10, fontFamily: T.font, fontWeight: 600, flexShrink: 0,
+            }}
+          >⇄</button>
+        )}
+      </div>
+
+      {open && (
+        <div style={{
+          border: `1px solid ${T.border}`, borderRadius: 8, overflow: "hidden",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+          background: "white",
+        }}>
+          {Object.entries(palettes).map(([name, cols]) => {
+            const disp = inverted ? [...cols].reverse() : cols;
+            return (
+              <div
+                key={name}
+                onClick={() => { onSelect(name); setOpen(false); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "7px 12px", cursor: "pointer",
+                  background: selected === name ? "rgba(37,99,235,0.06)" : "white",
+                  borderBottom: `1px solid ${T.border}`,
+                }}
+              >
+                <span style={{ width: 44, fontSize: 10, fontWeight: 600, color: T.textMuted, fontFamily: T.font }}>{name}</span>
+                <div style={{
+                  flex: 1, height: 14, borderRadius: 3,
+                  background: `linear-gradient(to right, ${disp.join(", ")})`,
+                  border: "1px solid rgba(0,0,0,0.08)",
+                }}/>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Field + scale selector row (Kepler style) ────────────────────────────────
+function FieldRow({
+  label, columns, colLoading, value, onChange,
+  scales, activeScale, onScaleChange,
+}: {
+  label: string;
+  columns: string[];
+  colLoading: boolean;
+  value: string;
+  onChange: (col: string) => void;
+  scales?: { key: string; label: string }[];
+  activeScale?: string;
+  onScaleChange?: (s: string) => void;
+}) {
+  const sel: React.CSSProperties = {
+    border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 6px",
+    fontSize: 11, fontFamily: T.font, color: T.text, background: "white",
+    cursor: "pointer", outline: "none", width: "100%",
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", gap: 5 }}>
+        <select style={{ ...sel, flex: 2 }} value={value} onChange={(e) => onChange(e.target.value)} disabled={colLoading}>
+          <option value="">— constant —</option>
+          {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        {scales && activeScale && onScaleChange && value && (
+          <select style={{ ...sel, flex: 1 }} value={activeScale} onChange={(e) => onScaleChange(e.target.value)}>
+            {scales.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Symbology Tab (Kepler-style) ─────────────────────────────────────────────
+const CLASS_SCALES = [
+  { key: "equalInterval",  label: "Equal interval" },
+  { key: "quantile",       label: "Quantile" },
+  { key: "naturalBreaks",  label: "Natural breaks" },
+  { key: "stdDev",         label: "Std deviation" },
+];
+
+// function SymbologyTab({ layer, updateLayer }: { layer: any; updateLayer: any }) {
+//   const { datasets } = useAppStore();
+//   const dataset = datasets.find((d) => d.id === layer.datasetId);
+
+//   const existing = layer.symbology;
+
+//   // ── Local state ──────────────────────────────────────────────────────────
+//   const [mode, setMode]             = useState<"single"|"categorized"|"graduated">(existing?.mode ?? "single");
+
+//   // Color channel
+//   const [colorField, setColorField] = useState<string>(existing?.col ?? "");
+//   const [colorScale, setColorScale] = useState<string>(existing?.scale ?? "quantile");
+//   const [catPalette, setCatPalette] = useState(existing?.palette ?? "Felt");
+//   const [rampPalette, setRampPalette] = useState(existing?.palette ?? "Viridis");
+//   const [inverted, setInverted]     = useState<boolean>(existing?.inverted ?? false);
+//   const [catColorOverrides, setCatColorOverrides] = useState<Record<string,string>>({});
+//   const [numClasses, setNumClasses] = useState(5);
+//   const [customBreaks, setCustomBreaks] = useState<number[] | null>(null);
+
+//   // Radius channel (points only)
+//   const isPoint = dataset?.renderType === "point";
+//   const [radiusField, setRadiusField] = useState<string>((layer.radiusChannel?.field) ?? "");
+//   const [radiusScale, setRadiusScale] = useState("linear");
+//   const [radiusMin, setRadiusMin]   = useState<number>((layer.radiusChannel?.range?.[0]) ?? 2);
+//   const [radiusMax, setRadiusMax]   = useState<number>((layer.radiusChannel?.range?.[1]) ?? 20);
+
+//   // Opacity
+//   const [opacity, setOpacity]       = useState<number>(layer.opacity ?? 1);
+
+//   // Section open/close
+//   const [openColor,  setOpenColor]  = useState(true);
+//   const [openRadius, setOpenRadius] = useState(false);
+//   const [openOpacity,setOpenOpacity]= useState(true);
+
+//   // Column/values loading
+//   const [columns, setColumns]       = useState<string[]>([]);
+//   const [colValues, setColValues]   = useState<string[]>([]);
+//   const [colLoading, setColLoading] = useState(false);
+//   const [numRange, setNumRange]     = useState<[number,number]>([0, 100]);
+//   const [applied, setApplied]       = useState(false);
+
+//   const isNumericCol = colValues.length > 0 && colValues
+//     .filter(v => v !== "" && v !== "No Data")
+//     .every(v => Number.isFinite(Number(v)));
+//   const numericVals  = colValues.map(Number).filter(Number.isFinite);
+//   const autoBreaks   = numericVals.length >= 2 ? computeBreaks(numericVals, numClasses, colorScale as any) : [];
+//   const activeBreaks = customBreaks ?? autoBreaks;
+
+//   // Load columns
+//   useEffect(() => {
+//     if (!dataset?.id) return;
+//     setColLoading(true);
+//     fetch(`${API}/datasets/${dataset.id}/columns`)
+//       .then(r => r.json())
+//       .then(data => {
+//         if (data.ok) {
+//           const cols = (data.columns as string[]).filter(c => c !== "dataset_id" && c !== "_fid");
+//           setColumns(cols);
+//           if (!colorField && cols.length) setColorField(cols[0]);
+//         }
+//       })
+//       .catch(() => {})
+//       .finally(() => setColLoading(false));
+//   }, [dataset?.id]);
+
+//   // Load values for chosen color field
+//   useEffect(() => {
+//     if (!dataset?.id || !colorField) return;
+//     fetch(`${API}/datasets/${dataset.id}/column-values/${encodeURIComponent(colorField)}`)
+//       .then(r => r.json())
+//       .then(data => {
+//         if (data.ok) {
+//           const vals = (data.values ?? []).map((v: any) =>
+//             v.value === null || v.value === undefined ? "" : String(v.value)
+//           );
+//           setColValues(vals);
+//           const nums = vals.map(Number).filter(Number.isFinite);
+//           if (nums.length) setNumRange([Math.min(...nums), Math.max(...nums)]);
+//         }
+//       })
+//       .catch(() => setColValues([]));
+//   }, [dataset?.id, colorField]);
+
+//   // Auto-switch graduated → categorized if column goes non-numeric
+//   useEffect(() => {
+//     if (mode === "graduated" && colValues.length > 0 && !isNumericCol) setMode("categorized");
+//   }, [colValues, mode]);
+
+//   function applySymbology() {
+//     // Apply opacity first (always)
+//     updateLayer(layer.id, { opacity });
+
+//     if (mode === "single") {
+//       updateLayer(layer.id, { symbology: { mode: "single" } });
+//     } else if (mode === "categorized") {
+//       const base = KP_CAT[catPalette] ?? Object.values(KP_CAT)[0];
+//       const colors = colValues.map((v, i) => catColorOverrides[v] ?? base[i % base.length]);
+//       updateLayer(layer.id, { symbology: { mode: "categorized", col: colorField, palette: catPalette, colors, values: colValues, scale: "ordinal" } });
+//     } else if (mode === "graduated") {
+//       const breaks = activeBreaks.length >= 2 ? activeBreaks : [numRange[0], numRange[1]];
+//       const ramp = KP_SEQ[rampPalette] ?? Object.values(KP_SEQ)[0];
+//       const pal = inverted ? [...ramp].reverse() : ramp;
+//       const colors = Array.from({ length: breaks.length - 1 }, (_, i) => {
+//         const t = (breaks.length - 1) === 1 ? 0 : i / (breaks.length - 2);
+//         return pal[Math.round(t * (pal.length - 1))];
+//       });
+//       updateLayer(layer.id, { symbology: {
+//         mode: "graduated", col: colorField, palette: rampPalette,
+//         colors, breaks, min: breaks[0], max: breaks[breaks.length - 1],
+//         scale: colorScale as any, inverted,
+//       }});
+//     }
+
+//     // Apply radius channel if point layer
+//     if (isPoint) {
+//       updateLayer(layer.id, {
+//         radiusChannel: radiusField
+//           ? { field: radiusField, scale: radiusScale as any, range: [radiusMin, radiusMax] }
+//           : null,
+//       });
+//     }
+
+//     setApplied(true);
+//     setTimeout(() => setApplied(false), 1500);
+//   }
+
+//   const catColors = KP_CAT[catPalette] ?? Object.values(KP_CAT)[0];
+
+//   // ── Render ──────────────────────────────────────────────────────────────
+//   return (
+//     <div style={{ display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 180px)" }}>
+//       <div style={{ overflowY: "auto", flex: 1 }}>
+
+//         {/* ── FILL COLOR section ─────────────────────────────────────── */}
+//         <SectionHeader
+//           label="Fill Color"
+//           open={openColor}
+//           onToggle={() => setOpenColor(o => !o)}
+//         />
+//         {openColor && (
+//           <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+
+//             {/* Mode pills — Kepler calls these "Based on" */}
+//             <div>
+//               <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>
+//                 Color based on
+//               </div>
+//               <div style={{ display: "flex", gap: 3 }}>
+//                 {(["single","categorized","graduated"] as const).map((m) => {
+//                   if (m === "graduated" && !isNumericCol && colValues.length > 0) return null;
+//                   return (
+//                     <button key={m} onClick={() => setMode(m)} style={{
+//                       flex: 1, padding: "5px 0", borderRadius: 6, border: "none", cursor: "pointer",
+//                       fontSize: 10, fontWeight: 700, fontFamily: T.font, letterSpacing: "0.04em",
+//                       background: mode === m ? "#18181b" : "rgba(0,0,0,0.05)",
+//                       color: mode === m ? "white" : T.textMuted,
+//                       transition: "background 0.15s",
+//                     }}>
+//                       {m === "single" ? "Single" : m === "categorized" ? "Categorical" : "Sequential"}
+//                     </button>
+//                   );
+//                 })}
+//               </div>
+//             </div>
+
+//             {/* Single mode */}
+//             {mode === "single" && (
+//               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+//                 {["#ef4444","#f97316","#eab308","#22c55e","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f59e0b","#64748b","#1e293b","#ffffff"].map(c => (
+//                   <button key={c} onClick={() => updateLayer(layer.id, { color: hexToRgb(c) })} style={{
+//                     width: 24, height: 24, borderRadius: "50%", border: "1.5px solid rgba(0,0,0,0.1)",
+//                     cursor: "pointer", background: c, padding: 0,
+//                     outline: rgbToHex(layer.color) === c ? `2px solid ${c}` : "2px solid transparent",
+//                     outlineOffset: 2,
+//                   }}/>
+//                 ))}
+//                 {/* Custom color picker */}
+//                 <label style={{ width: 24, height: 24, borderRadius: "50%", border: `1.5px dashed ${T.border}`, cursor: "pointer", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+//                   <span style={{ fontSize: 14, color: T.textMuted, lineHeight: 1 }}>+</span>
+//                   <input type="color" value={rgbToHex(layer.color)}
+//                     onChange={e => updateLayer(layer.id, { color: hexToRgb(e.target.value) })}
+//                     style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer" }}
+//                   />
+//                 </label>
+//               </div>
+//             )}
+
+//             {/* Categorized mode */}
+//             {mode === "categorized" && (
+//               <>
+//                 <FieldRow
+//                   label="Field"
+//                   columns={columns} colLoading={colLoading}
+//                   value={colorField} onChange={setColorField}
+//                 />
+//                 <div>
+//                   <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>
+//                     Color palette
+//                   </div>
+//                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+//                     {Object.entries(KP_CAT).map(([name, cols]) => (
+//                       <div key={name} onClick={() => setCatPalette(name)} style={{
+//                         display: "flex", alignItems: "center", gap: 8, padding: "5px 8px",
+//                         borderRadius: 6, cursor: "pointer",
+//                         background: catPalette === name ? "rgba(37,99,235,0.07)" : "transparent",
+//                         border: `1px solid ${catPalette === name ? T.accent : "transparent"}`,
+//                       }}>
+//                         <span style={{ width: 40, fontSize: 10, fontWeight: 600, color: T.textMuted, fontFamily: T.font }}>{name}</span>
+//                         <div style={{ display: "flex", gap: 2 }}>
+//                           {cols.slice(0, 8).map((c, i) => <div key={i} style={{ width: 12, height: 12, borderRadius: 2, background: c }}/>)}
+//                         </div>
+//                       </div>
+//                     ))}
+//                   </div>
+//                 </div>
+//                 {colValues.length > 0 && (
+//                   <div style={{ maxHeight: 160, overflowY: "auto", scrollbarWidth: "thin", display: "flex", flexDirection: "column", gap: 3 }}>
+//                     {colValues.map((val, i) => {
+//                       const cur = catColorOverrides[val] ?? catColors[i % catColors.length];
+//                       return (
+//                         <div key={val} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+//                           <label style={{ width: 16, height: 16, borderRadius: 3, background: cur, flexShrink: 0, cursor: "pointer", border: "1px solid rgba(0,0,0,0.12)", position: "relative" }}>
+//                             <input type="color" value={cur}
+//                               onChange={e => setCatColorOverrides(p => ({ ...p, [val]: e.target.value }))}
+//                               style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer", top: 0, left: 0 }}
+//                             />
+//                           </label>
+//                           <span style={{ fontSize: 11, color: val === "" ? T.textLight : T.text, fontFamily: T.font, fontStyle: val === "" ? "italic" : "normal" }}>
+//                             {val === "" ? "No Data" : val}
+//                           </span>
+//                         </div>
+//                       );
+//                     })}
+//                   </div>
+//                 )}
+//               </>
+//             )}
+
+//             {/* Graduated / sequential mode */}
+//             {mode === "graduated" && (
+//               <>
+//                 <FieldRow
+//                   label="Field"
+//                   columns={columns} colLoading={colLoading}
+//                   value={colorField} onChange={v => { setColorField(v); setCustomBreaks(null); }}
+//                   scales={CLASS_SCALES} activeScale={colorScale} onScaleChange={s => { setColorScale(s); setCustomBreaks(null); }}
+//                 />
+//                 <div>
+//                   <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>
+//                     Color range
+//                   </div>
+//                   <PaletteBar
+//                     palettes={KP_SEQ} selected={rampPalette} onSelect={setRampPalette}
+//                     inverted={inverted} onInvert={() => setInverted(v => !v)}
+//                   />
+//                 </div>
+//                 {/* Classes */}
+//                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+//                   <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font, whiteSpace: "nowrap" }}>Classes</span>
+//                   <input type="range" min={2} max={8} step={1} value={numClasses}
+//                     onChange={e => { setNumClasses(Number(e.target.value)); setCustomBreaks(null); }}
+//                     style={{ flex: 1 }}
+//                   />
+//                   <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 12, textAlign: "center" }}>{numClasses}</span>
+//                 </div>
+//                 {/* Break preview */}
+//                 {activeBreaks.length >= 2 && (
+//                   <div>
+//                     <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>
+//                       Breaks
+//                     </div>
+//                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+//                       {activeBreaks.slice(0, -1).map((brk, i) => {
+//                         const ramp = KP_SEQ[rampPalette] ?? Object.values(KP_SEQ)[0];
+//                         const pal = inverted ? [...ramp].reverse() : ramp;
+//                         const t = (activeBreaks.length - 2) === 0 ? 0 : i / (activeBreaks.length - 2);
+//                         const swatch = pal[Math.round(t * (pal.length - 1))];
+//                         return (
+//                           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+//                             <div style={{ width: 14, height: 14, borderRadius: 3, background: swatch, flexShrink: 0, border: "1px solid rgba(0,0,0,0.1)" }}/>
+//                             <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>
+//                               {brk.toFixed(2)} – {activeBreaks[i + 1].toFixed(2)}
+//                             </span>
+//                           </div>
+//                         );
+//                       })}
+//                     </div>
+//                     <button onClick={() => setCustomBreaks(null)} style={{
+//                       marginTop: 6, fontSize: 10, fontWeight: 600, fontFamily: T.font,
+//                       color: T.accent, background: "none", border: "none", cursor: "pointer", padding: 0,
+//                     }}>
+//                       Reset to auto
+//                     </button>
+//                   </div>
+//                 )}
+//               </>
+//             )}
+//           </div>
+//         )}
+
+//         {/* ── RADIUS section (points only) ──────────────────────────── */}
+//         {isPoint && (
+//           <>
+//             <SectionHeader label="Radius" open={openRadius} onToggle={() => setOpenRadius(o => !o)} />
+//             {openRadius && (
+//               <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+//                 <FieldRow
+//                   label="Field"
+//                   columns={columns} colLoading={colLoading}
+//                   value={radiusField} onChange={setRadiusField}
+//                   scales={[
+//                     { key: "linear", label: "Linear" },
+//                     { key: "sqrt",   label: "Sqrt" },
+//                     { key: "log",    label: "Log" },
+//                   ]}
+//                   activeScale={radiusScale} onScaleChange={setRadiusScale}
+//                 />
+//                 <div style={{ display: "flex", gap: 8 }}>
+//                   <div style={{ flex: 1 }}>
+//                     <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Min px</div>
+//                     <input type="number" min={1} max={50} value={radiusMin} onChange={e => setRadiusMin(Number(e.target.value))}
+//                       style={{ width: "100%", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", boxSizing: "border-box" }}
+//                     />
+//                   </div>
+//                   <div style={{ flex: 1 }}>
+//                     <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Max px</div>
+//                     <input type="number" min={1} max={200} value={radiusMax} onChange={e => setRadiusMax(Number(e.target.value))}
+//                       style={{ width: "100%", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", boxSizing: "border-box" }}
+//                     />
+//                   </div>
+//                 </div>
+//               </div>
+//             )}
+//           </>
+//         )}
+
+//         {/* ── OPACITY section ───────────────────────────────────────── */}
+//         <SectionHeader label="Opacity" open={openOpacity} onToggle={() => setOpenOpacity(o => !o)} />
+//         {openOpacity && (
+//           <div style={{ padding: "12px 16px" }}>
+//             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+//               <input type="range" min={0} max={1} step={0.01} value={opacity}
+//                 onChange={e => setOpacity(Number(e.target.value))}
+//                 style={{ flex: 1 }}
+//               />
+//               <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 32, textAlign: "right" }}>
+//                 {Math.round(opacity * 100)}%
+//               </span>
+//             </div>
+//           </div>
+//         )}
+
+//       </div>
+
+//       {/* ── Apply button ──────────────────────────────────────────── */}
+//       <div style={{ padding: "12px 16px", borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+//         <button onClick={applySymbology} style={{
+//           width: "100%", padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
+//           fontSize: 12, fontWeight: 700, fontFamily: T.font,
+//           background: applied ? T.green : T.accent, color: "white",
+//           transition: "background 0.2s",
+//         }}>
+//           {applied ? "✓ Applied" : "Apply"}
+//         </button>
+//       </div>
+//     </div>
+//   );
+// }
+
 // ─── Filter Tab ───────────────────────────────────────────────────────────────
 type FilterRule = { col: string; op: string; val: string };
 const OPS = ["=", "≠", ">", "<", "≥", "≤", "contains", "is empty"];
@@ -2153,10 +2876,19 @@ function ScaleBar({ zoom, latitude }: { zoom: number; latitude: number }) {
 }
 
 // ─── Edit Mode Panel ──────────────────────────────────────────────────────────
-function EditModePanel() {
+function EditModePanel({ forceOpen, onOpen, onClose }: {
+  forceOpen?: boolean;
+  onOpen?: () => void;
+  onClose?: () => void;
+}) {
   const { datasets, activeDatasetId, setActiveDatasetId } = useAppStore();
   const [open, setOpen] = useState(false);
   const [hov, setHov]   = useState(false);
+
+  // Sync with external forceOpen
+  useEffect(() => {
+    if (forceOpen !== undefined) setOpen(forceOpen);
+  }, [forceOpen]);
   const isEditing = activeDatasetId !== null;
   const editableDatasets = datasets.filter((d) => d.renderType && d.renderType !== "mixed");
 
@@ -2178,7 +2910,12 @@ function EditModePanel() {
 
   return (
     <div style={{ position: "relative" }}>
-      <button onClick={() => setOpen((o) => !o)}
+      <button onClick={() => {
+          const next = !open;
+          setOpen(next);
+          if (next) onOpen?.();
+          else onClose?.();
+        }}
         onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
         style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 16px", borderRadius: 12, border: `1px solid ${T.border}`, cursor: "pointer", fontFamily: T.font, fontSize: 13, fontWeight: 600, background: open ? T.text : hov ? "rgba(255,255,255,1)" : T.card, color: open ? "white" : T.text, boxShadow: T.shadow, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", transition: "background 0.15s" }}>
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>
@@ -2231,11 +2968,44 @@ export function FeltUI() {
   const { viewState, activeDatasetId, datasets, addMapPin, setActiveTool,mapPins, mapContextMenu, setMapContextMenu } = useAppStore();
   const [styleLayerId, setStyleLayerId] = useState<string|null>(null);
   const [attrLayerId, setAttrLayerId]   = useState<string|null>(null);
+  const [editPanelOpen, setEditPanelOpen] = useState(false);
+  const [basemapOpen, setBasemapOpen]   = useState(false);
+  const [rightPanel, setRightPanel]     = useState<"style"|"edit"|null>(null);
+  
+
+  const closeAllPanels = useCallback(() => {
+    setStyleLayerId(null);
+    setEditPanelOpen(false);
+    setBasemapOpen(false);
+  }, []);
+
+  const handleStyle = useCallback((id: string) => {
+    const isToggleOff = styleLayerId === id;
+    closeAllPanels();
+    if (!isToggleOff) setStyleLayerId(id);
+  }, [styleLayerId, closeAllPanels]);
+
+  const handleEditOpen = useCallback(() => {
+    closeAllPanels();
+    setEditPanelOpen(true);
+  }, [closeAllPanels]);
+
+  const handleEditClose = useCallback(() => {
+    setEditPanelOpen(false);
+  }, []);
+  const handleAttr = useCallback((id: string) => {
+    setAttrLayerId((p) => p === id ? null : id);
+  }, []);
+  const handleBasemapOpen = useCallback(() => {
+    closeAllPanels();
+    setBasemapOpen(true);
+  }, [closeAllPanels]);
+
+  const handleBasemapClose = useCallback(() => {
+    setBasemapOpen(false);
+  }, []);
 
 
-
-  const handleStyle = useCallback((id: string) => setStyleLayerId((p) => p === id ? null : id), []);
-  const handleAttr  = useCallback((id: string) => setAttrLayerId((p) => p === id ? null : id), []);
 
   const isEditing = activeDatasetId !== null;
   const activeDs  = datasets.find((d) => d.id === activeDatasetId);
@@ -2253,6 +3023,14 @@ export function FeltUI() {
         <div style={{ background: "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", padding: "6px 12px", borderRadius: 10, boxShadow: "0 1px 6px rgba(0,0,0,0.1)", border: `1px solid ${T.border}` }}>
           <ScaleBar zoom={viewState.zoom} latitude={viewState.latitude}/>
         </div>
+      </div>
+
+      <div style={{ position: "absolute", bottom: attrH + 12, right: 16, zIndex: 20, transition: "bottom 0.25s ease" }}>
+        <BasemapPicker
+          forceOpen={basemapOpen}
+          onOpen={handleBasemapOpen}
+          onClose={handleBasemapClose}
+        />
       </div>
 
       {/* Projects panel — top left */}
@@ -2278,9 +3056,18 @@ export function FeltUI() {
 
       {/* Edit panel — top right */}
       <div style={{ position: "absolute", top: 16, right: 16, zIndex: 25 }}>
-        <EditModePanel />
+        <EditModePanel
+          forceOpen={editPanelOpen}
+          onOpen={handleEditOpen}
+          onClose={handleEditClose}
+        />
       </div>
-
+      
+      {/* Auto-close style dialog when editing starts */}
+      {isEditing && styleLayerId && (() => { 
+        // Can't call setState in render — use useEffect instead
+        return null; 
+      })()}
       {/* Active edit banner */}
       {isEditing && activeDs && (
         <div style={{ position: "absolute", top: 60, left: "50%", transform: "translateX(-50%)", zIndex: 20, background: T.green, color: "white", padding: "7px 18px", borderRadius: 12, fontSize: 12, fontWeight: 600, fontFamily: T.font, display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 16px rgba(16,185,129,0.35)", whiteSpace: "nowrap" }}>

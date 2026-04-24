@@ -15,7 +15,6 @@ const API = "http://localhost:8787";
 function rgbToCss([r, g, b]: [number, number, number]) {
   return `rgb(${r}, ${g}, ${b})`;
 }
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type GeoFeature = {
@@ -31,6 +30,51 @@ type PendingChange =
   | { kind: "delete"; featureId: string;   table: string };
 
 type EditMode = "none" | "select" | "add-point" | "draw-line" | "draw-polygon" | "move-feature";
+
+
+export const BASEMAPS = {
+  "dark": "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+  "light": "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+  "google": {
+    version: 8, name: "Google (Raster)",
+    sources: { "google-maps-raster": { type: "raster", tiles: [
+      "https://mt0.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&scale=2",
+      "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&scale=2",
+      "https://mt2.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&scale=2",
+      "https://mt3.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&scale=2",
+    ], tileSize: 256 } },                    // ← closes sources value + sources object
+    layers: [{ id: "default", type: "raster", source: "google-maps-raster", minzoom: 0, maxzoom: 22 }],
+  },                                          // ← closes "google" object
+  "google-hybrid": {
+    version: 8, name: "Google (Hybrid)",
+    sources: { "google-maps-raster": { type: "raster", tiles: [
+      "https://mt0.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}&scale=2",
+      "https://mt1.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}&scale=2",
+      "https://mt2.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}&scale=2",
+      "https://mt3.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}&scale=2",
+    ], tileSize: 256 } },
+    layers: [{ id: "default", type: "raster", source: "google-maps-raster", minzoom: 0, maxzoom: 22 }],
+  },
+  "google-no-labels": {
+    version: 8, name: "Google (No Labels)",
+    sources: { "google-maps-raster": { type: "raster", tiles: [
+      "https://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&apistyle=s.t:2|s.e:l|p.v:off",
+      "https://mt1.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&apistyle=s.t:2|s.e:l|p.v:off",
+      "https://mt2.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&apistyle=s.t:2|s.e:l|p.v:off",
+      "https://mt3.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&apistyle=s.t:2|s.e:l|p.v:off",
+    ], tileSize: 256 } },
+    layers: [{ id: "default", type: "raster", source: "google-maps-raster", minzoom: 0, maxzoom: 22 }],
+  },
+  "osm": {
+    version: 8, name: "OpenStreetMap",
+    sources: { "openstreetmap-raster": { type: "raster", tiles: [
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ], tileSize: 256 } },
+    layers: [{ id: "default", type: "raster", source: "openstreetmap-raster", minzoom: 0, maxzoom: 22 }],
+  },
+} as const;          
+
+export type BasemapId = keyof typeof BASEMAPS;
 
 // ── sanitizeProps ─────────────────────────────────────────────────────────────
 
@@ -433,6 +477,20 @@ function EditToolbar({
   );
 }
 
+// Add this helper near the top of MapView.tsx (or alongside rgbToCss)
+function hexToRgba(hex: string, opacity: number): string {
+  if (hex.startsWith("rgb")) {
+    const m = hex.match(/[\d.]+/g);
+    if (m) return `rgba(${m[0]},${m[1]},${m[2]},${opacity})`;
+  }
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return `rgba(255,255,255,${opacity})`;
+  return `rgba(${r},${g},${b},${opacity})`;
+}
+
 // ── FeaturePopup ──────────────────────────────────────────────────────────────
 
 function FeaturePopup({
@@ -608,7 +666,10 @@ export function MapView() {
     activeDatasetId, setActiveDatasetId,
     zoomTarget, filterRules,
     setMapContextMenu,
+    basemap,
   } = useAppStore();
+  // ADD this line immediately after the useAppStore destructure:
+  const mapStyle = BASEMAPS[(basemap ?? "dark") as keyof typeof BASEMAPS];
   
   // Controlled view state — DeckGL reads this every render
   const [deckViewState, setDeckViewState] = useState<any>({
@@ -1359,7 +1420,7 @@ export function MapView() {
         <Map
           ref={mapRef}
           reuseMaps={false}
-          mapStyle={BASEMAP}
+          mapStyle={mapStyle as any}
           onLoad={() => console.log("Map loaded")}
           onError={(e: any) => console.error("MapLibre error:", e)}
         >
@@ -1460,7 +1521,27 @@ export function MapView() {
                     paint={{
                       "circle-color":        colorExpr,
                       "circle-opacity":      layer.opacity,
-                      "circle-radius":       ["interpolate", ["linear"], ["zoom"], 0,4, 6,6, 10,7, 14,8, 18,10],
+                      "circle-radius": (() => {
+                        const rc = (layer as any).radiusChannel;
+                        if (rc?.field) {
+                          // Data-driven radius: interpolate field value → pixel size
+                          const [rMin, rMax] = rc.range ?? [2, 20];
+                          if (rc.scale === "sqrt") {
+                            return ["interpolate", ["linear"],
+                              ["sqrt", ["max", ["to-number", ["get", rc.field], 0], 0]],
+                              0, rMin,
+                              ["sqrt", numRange[1] || 100], rMax,  // numRange not available here — use a constant or store max on the layer
+                            ];
+                          }
+                          // linear fallback
+                          return ["interpolate", ["linear"],
+                            ["to-number", ["get", rc.field], 0],
+                            0, rMin, 1e6, rMax,
+                          ];
+                        }
+                        // Zoom-based constant radius (existing behaviour)
+                        return ["interpolate", ["linear"], ["zoom"], 0,4, 6,6, 10,7, 14,8, 18,10];
+                      })(),
                       "circle-stroke-width": 1.5,
                       "circle-stroke-color": "#fff",
                     }}
@@ -1474,7 +1555,7 @@ export function MapView() {
                     layout={{ "line-cap": "round", "line-join": "round" }}
                     paint={{
                       "line-color":   colorExpr,
-                      "line-opacity": layer.opacity,
+                      "line-opacity": (layer as any).strokeOpacity ?? layer.opacity,
                       "line-width":   (layer as any).strokeWidth ?? 2,
                     }}
                   />,
@@ -1485,24 +1566,27 @@ export function MapView() {
                   <Layer key={`${layer.id}-fill`} id={`${layer.id}-fill`}
                     type="fill" source={`polygons-geojson-${dataset.id}`}
                     minzoom={0} maxzoom={24}
-                    // ← NO filter prop — the GeoJSON source is already filtered
                     paint={{
                       "fill-color":         colorExpr,
-                      "fill-opacity":       layer.opacity * 0.7,
-                      "fill-outline-color": (layer as any).strokeColor ?? color,
+                      "fill-opacity":       (layer as any).fillEnabled === false ? 0 : layer.opacity * 0.7,
+                      "fill-outline-color": "transparent",
                     }}
                   />,
-                  <Layer key={`${layer.id}-outline`} id={`${layer.id}-outline`}
-                    type="line" source={`polygons-geojson-${dataset.id}`}
-                    minzoom={0} maxzoom={24}
-                    // ← NO filter prop, NO source-layer
-                    layout={{ "line-cap": "round", "line-join": "round" }}
-                    paint={{
-                      "line-color":   (layer as any).strokeColor ?? color,
-                      "line-opacity": layer.opacity,
-                      "line-width":   (layer as any).strokeWidth ?? 1.5,
-                    }}
-                  />,
+                  ...((layer as any).strokeEnabled === false ? [] : [
+                    <Layer key={`${layer.id}-outline`} id={`${layer.id}-outline`}
+                      type="line" source={`polygons-geojson-${dataset.id}`}
+                      minzoom={0} maxzoom={24}
+                      layout={{ "line-cap": "round", "line-join": "round" }}
+                      paint={{
+                        "line-color":   hexToRgba(
+                          (layer as any).strokeColor ?? color,
+                          (layer as any).strokeOpacity ?? 1
+                        ),
+                        "line-opacity": 1,
+                        "line-width":   (layer as any).strokeWidth ?? 1.5,
+                      }}
+                    />
+                  ]),
                 ];
                 return [];
               })
