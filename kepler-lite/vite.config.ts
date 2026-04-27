@@ -1,11 +1,14 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    tailwindcss(),
+  ],
   server: {
     proxy: {
-      // anything under /martin/* will be forwarded to localhost:3000
       "/martin": {
         target: "http://localhost:3000",
         changeOrigin: true,

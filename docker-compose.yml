@@ -1,0 +1,84 @@
+services:
+
+  # ── 1. PostGIS database ──────────────────────────────────────────────────────
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: kepler-postgis
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kepler
+    ports:
+      - "15432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kepler"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── 2. Run migrations (one-shot, exits when done) ────────────────────────────
+  migrate:
+    image: postgis/postgis:16-3.4
+    container_name: kepler-migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./postgres/migrations:/migrations
+    command: >
+      psql -h db -U postgres -d kepler -f /migrations/001_init.sql
+    restart: "no"
+
+  # ── 3. Martin tile server ────────────────────────────────────────────────────
+  martin:
+    image: ghcr.io/maplibre/martin:v0.13.0
+    container_name: kepler-martin
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/kepler
+      RUST_LOG: info
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./postgres/martin.yaml:/config.yaml
+    command: ["--config", "/config.yaml"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── 4. Upload API (Bun / Hono) ───────────────────────────────────────────────
+  upload-service:
+    build:
+      context: ./kepler-backend/upload-service
+      dockerfile: Dockerfile
+    container_name: kepler-upload
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/kepler
+      MARTIN_BASE: http://martin:3000
+      PORT: "8787"
+      TEMP_DIR: /tmp/kepler-uploads
+    ports:
+      - "8787:8787"
+
+  # ── 5. Frontend (Vite preview) ───────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./kepler-lite
+      dockerfile: Dockerfile
+    container_name: kepler-frontend
+    ports:
+      - "5173:5173"
+
+volumes:
+  pg_data:
