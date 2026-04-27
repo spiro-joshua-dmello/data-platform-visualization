@@ -52,6 +52,7 @@ export type LayerConfig = {
     field: string | null;
     scale: "linear" | "sqrt" | "log";
     range: [number, number];      // [minRadius, maxRadius] in px
+    fieldMax?: number;            // ← actual data maximum, used to calibrate interpolation
   };
 };
 

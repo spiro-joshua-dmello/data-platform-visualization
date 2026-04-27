@@ -129,6 +129,35 @@ function sanitizeProps(raw: Record<string, any>): Record<string, string> {
   );
 }
 
+
+function geodesicCircle(lng: number, lat: number, radiusKm: number, steps = 64): [number, number][] {
+  const coords: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const bearing = (i / steps) * 2 * Math.PI;
+    const latR = (lat * Math.PI) / 180;
+    const d = radiusKm / 6371; // angular distance in radians
+    const lat2 = Math.asin(Math.sin(latR) * Math.cos(d) + Math.cos(latR) * Math.sin(d) * Math.cos(bearing));
+    const lng2 = (lng * Math.PI) / 180 + Math.atan2(
+      Math.sin(bearing) * Math.sin(d) * Math.cos(latR),
+      Math.cos(d) - Math.sin(latR) * Math.sin(lat2)
+    );
+    coords.push([(lng2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
+  }
+  return coords;
+}
+
+// Generate a geodesic circle polygon around [lng, lat] with radius in km
+function makeCircleGeoJSON(lng: number, lat: number, radiusKm: number, steps = 64) {
+  const coords: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
+    const dx = (radiusKm / 111.32) / Math.cos((lat * Math.PI) / 180);
+    const dy = radiusKm / 110.574;
+    coords.push([lng + dx * Math.sin(angle), lat + dy * Math.cos(angle)]);
+  }
+  return { type: "Feature" as const, geometry: { type: "Polygon", coordinates: [coords] }, properties: {} };
+}
+
 // ── AttributeModal ────────────────────────────────────────────────────────────
 
 function AttributeModal({
@@ -692,7 +721,41 @@ export function MapView() {
     origGeom: any;
   } | null>(null);
 
-  
+  const [bufferGeoJSONs, setBufferGeoJSONs] = useState<Record<string, any>>({});
+
+  // Fetch point features for layers that have buffer enabled
+  useEffect(() => {
+    const bufferLayers = layers.filter(l => l.visible && (l as any).bufferEnabled && (l as any).bufferKm);
+    if (bufferLayers.length === 0) { setBufferGeoJSONs({}); return; }
+
+    bufferLayers.forEach(async (layer) => {
+      const ds = datasets.find(d => d.id === layer.datasetId);
+      if (!ds || ds.renderType !== "point") return;
+      const table = "points";
+      try {
+        const res = await fetch(`${API}/datasets/${ds.id}/features?table=${table}&nogeom=false`);
+        const fc = await res.json();
+        const bufKm = (layer as any).bufferKm ?? 1;
+        const bufferFeatures = (fc.features ?? [])
+          .filter((f: any) => f.geometry?.type === "Point")
+          .map((f: any) => {
+            const [lng, lat] = f.geometry.coordinates;
+            return {
+              type: "Feature",
+              geometry: { type: "Polygon", coordinates: [geodesicCircle(lng, lat, bufKm)] },
+              properties: f.properties ?? {},
+            };
+          });
+        setBufferGeoJSONs(prev => ({
+          ...prev,
+          [layer.id]: { type: "FeatureCollection", features: bufferFeatures },
+        }));
+      } catch (e) { console.error("Buffer fetch failed", e); }
+    });
+  }, [
+    layers.map(l => `${l.id}:${(l as any).bufferEnabled}:${(l as any).bufferKm}`).join("|"),
+    datasets.map(d => d.id).join("|"),
+  ]);
   // ── Zoom to layer via DeckGL FlyToInterpolator ───────────────────────────
   useEffect(() => {
     if (!zoomTarget) return;
@@ -1468,7 +1531,7 @@ export function MapView() {
           })}
 
           {vectorDatasets.flatMap((dataset) =>
-            layers
+            [...layers].reverse()
               .filter((l) => l.visible && l.datasetId === dataset.id)
               .flatMap((layer) => {
 
@@ -1524,26 +1587,44 @@ export function MapView() {
                       "circle-radius": (() => {
                         const rc = (layer as any).radiusChannel;
                         if (rc?.field) {
-                          // Data-driven radius: interpolate field value → pixel size
                           const [rMin, rMax] = rc.range ?? [2, 20];
+                          const fieldMin = rc.fieldMin ?? 0;
+                          const fieldMax = rc.fieldMax ?? 100;
+                          // Scale down the output range — kepler uses ~1/3 of the px value at typical zoom
+                          const scale = 0.25;
+                          const pxMin = rMin * scale;
+                          const pxMax = rMax * scale;
+
                           if (rc.scale === "sqrt") {
-                            return ["interpolate", ["linear"],
-                              ["sqrt", ["max", ["to-number", ["get", rc.field], 0], 0]],
-                              0, rMin,
-                              ["sqrt", numRange[1] || 100], rMax,  // numRange not available here — use a constant or store max on the layer
+                            const sqrtMin = Math.sqrt(Math.max(fieldMin, 0));
+                            const sqrtMax = Math.sqrt(Math.max(fieldMax, sqrtMin + 0.001));
+                            return [
+                              "interpolate", ["linear"],
+                              ["sqrt", ["max", ["to-number", ["get", rc.field], fieldMin], 0]],
+                              sqrtMin, pxMin,
+                              sqrtMax, pxMax,
                             ];
                           }
-                          // linear fallback
-                          return ["interpolate", ["linear"],
-                            ["to-number", ["get", rc.field], 0],
-                            0, rMin, 1e6, rMax,
+                          if (rc.scale === "log") {
+                            return [
+                              "interpolate", ["linear"],
+                              ["log2", ["max", ["to-number", ["get", rc.field], 1], 1]],
+                              Math.log2(Math.max(fieldMin, 1)), pxMin,
+                              Math.log2(Math.max(fieldMax, 2)), pxMax,
+                            ];
+                          }
+                          return [
+                            "interpolate", ["linear"],
+                            ["to-number", ["get", rc.field], fieldMin],
+                            fieldMin, pxMin,
+                            fieldMax, pxMax,
                           ];
                         }
-                        // Zoom-based constant radius (existing behaviour)
                         return ["interpolate", ["linear"], ["zoom"], 0,4, 6,6, 10,7, 14,8, 18,10];
                       })(),
-                      "circle-stroke-width": 1.5,
-                      "circle-stroke-color": "#fff",
+                      "circle-stroke-width": (layer as any).strokeEnabled === false ? 0 : ((layer as any).strokeWidth ?? 1.5),
+                      "circle-stroke-color": (layer as any).strokeColor ?? "#ffffff",
+                      "circle-stroke-opacity": (layer as any).strokeOpacity ?? 1,
                     }}
                   />,
                 ];
@@ -1587,11 +1668,52 @@ export function MapView() {
                       }}
                     />
                   ]),
+                  ...(((layer as any).labelEnabled && (layer as any).labelField) ? [
+                    <Layer key={`${layer.id}-label`} id={`${layer.id}-label`}
+                      type="symbol"
+                      source={`polygons-geojson-${dataset.id}`}
+                      minzoom={0} maxzoom={24}
+                      layout={{
+                        "text-field": ["to-string", ["get", (layer as any).labelField]],
+                        "text-size": 11,
+                        "text-offset": [0, 1.2],
+                        "text-anchor": "top",
+                        "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+                      }}
+                      paint={{
+                        "text-color": "#111827",
+                        "text-halo-color": "#ffffff",
+                        "text-halo-width": 1.5,
+                      }}
+                    />
+                  ] : []),
                 ];
                 return [];
               })
           )}
 
+
+          {/* ── Buffer circles ── */}
+          {layers.filter(l => l.visible && (l as any).bufferEnabled && bufferGeoJSONs[l.id]).map(layer => {
+            const bufStroke  = (layer as any).bufferStroke     ?? "#3b82f6";
+            const bufSolid   = (layer as any).bufferColorSolid ?? "#3b82f6";
+            return (
+              <React.Fragment key={`buffer-${layer.id}`}>
+                <Source id={`buffer-${layer.id}`} type="geojson" data={bufferGeoJSONs[layer.id]}>
+                  <Layer id={`buffer-fill-${layer.id}`} type="fill"
+                    paint={{
+                      "fill-color":   (layer as any).bufferColorSolid ?? "#3b82f6",
+                      "fill-opacity": (layer as any).bufferFillTransparent ? 0 : 0.1,
+                    }}
+                  />
+                  <Layer id={`buffer-stroke-${layer.id}`} type="line"
+                    layout={{ "line-cap": "round", "line-join": "round" }}
+                    paint={{ "line-color": bufStroke, "line-width": 1.5, "line-opacity": 0.8, "line-dasharray": [4, 2] }}
+                  />
+                </Source>
+              </React.Fragment>
+            );
+          })}
           {/* ── Selection highlight ── */}
           {selectedFeature && selectedFeature.geometry && (
             <>

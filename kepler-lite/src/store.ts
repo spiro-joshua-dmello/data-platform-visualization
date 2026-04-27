@@ -181,6 +181,14 @@ export const useAppStore = create<AppState>()(persist((set) => ({
       layers: s.layers.filter((l) => l.id !== id),
     })),
 
+  reorderLayer: (fromIndex: number, toIndex: number) =>
+    set((s) => {
+      const layers = [...s.layers];
+      const [moved] = layers.splice(fromIndex, 1);
+      layers.splice(toIndex, 0, moved);
+      return { layers };
+    }),
+    
   setViewState: (patch) =>
     set((s) => ({
       viewState: { ...s.viewState, ...patch },

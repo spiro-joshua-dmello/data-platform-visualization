@@ -31,6 +31,8 @@ const sql = postgres(DATABASE_URL, {
   onnotice: () => {},
 });
 
+
+
 await mkdir(TEMP_DIR, { recursive: true });
 
 const app = new Hono();
@@ -1203,31 +1205,106 @@ app.get("/datasets/:datasetId/features", async (c) => {
     return c.json(badRequest("BAD_TABLE", "Invalid table"), 400);
   }
 
+  const noGeom = c.req.query("nogeom") === "true";
+
   const rows = await sql.unsafe(
     `SELECT id::text,
-            props,
-            ST_AsGeoJSON(geom)::json AS geometry
+            props
+            ${noGeom ? "" : ", ST_AsGeoJSON(geom)::json AS geometry"}
      FROM ${table}
-     WHERE dataset_id = $1::uuid
-     LIMIT 100000`,
+     WHERE dataset_id = $1::uuid`,
     [datasetId]
   );
 
   const features = rows.map((r: any) => {
-      let rawProps = r.props ?? {};
-      if (typeof rawProps === "string") {
-        try { rawProps = JSON.parse(rawProps); } catch { rawProps = {}; }
-      }
-      return {
-        type:       "Feature",
-        id:         r.id,
-        geometry:   r.geometry,
-        properties: { ...rawProps, _fid: r.id },
-      };
-    });
-
+    let rawProps = r.props ?? {};
+    if (typeof rawProps === "string") {
+      try { rawProps = JSON.parse(rawProps); } catch { rawProps = {}; }
+    }
+    return {
+      type:     "Feature",
+      id:       r.id,
+      geometry: noGeom ? null : r.geometry,
+      properties: { ...rawProps, _fid: r.id },
+    };
+  });
   return c.json({ type: "FeatureCollection", features });
 });
+
+
+// GET /datasets/:datasetId/column-stats/:column — min, max, mean of a numeric column
+app.get("/datasets/:datasetId/column-stats/:column", async (c) => {
+  const { datasetId, column } = c.req.param();
+  const tables = ["points", "lines", "polygons"];
+  let table = "points";
+
+  for (const tbl of tables) {
+    const rows = await sql.unsafe(
+      `SELECT COUNT(*)::int AS cnt FROM ${tbl} WHERE dataset_id = $1::uuid`,
+      [datasetId]
+    ) as any[];
+    if (Number(rows[0]?.cnt) > 0) { table = tbl; break; }
+  }
+
+  const rows = await sql.unsafe(
+    `SELECT
+       MIN((CASE jsonb_typeof(props)
+         WHEN 'object' THEN props->>$2
+         WHEN 'string' THEN (props #>> '{}')::jsonb->>$2
+       END)::numeric) AS min,
+       MAX((CASE jsonb_typeof(props)
+         WHEN 'object' THEN props->>$2
+         WHEN 'string' THEN (props #>> '{}')::jsonb->>$2
+       END)::numeric) AS max,
+       AVG((CASE jsonb_typeof(props)
+         WHEN 'object' THEN props->>$2
+         WHEN 'string' THEN (props #>> '{}')::jsonb->>$2
+       END)::numeric) AS mean
+     FROM ${table}
+     WHERE dataset_id = $1::uuid`,
+    [datasetId, column]
+  ) as any[];
+
+  const row = rows[0];
+  return c.json({
+    ok: true,
+    min: row?.min != null ? Number(row.min) : null,
+    max: row?.max != null ? Number(row.max) : null,
+    mean: row?.mean != null ? Number(row.mean) : null,
+  });
+});
+
+// GET /datasets/:datasetId/rows — props only, paginated (for attribute table)
+app.get("/datasets/:datasetId/rows", async (c) => {
+  const { datasetId } = c.req.param();
+  const table  = c.req.query("table") ?? "points";
+  const limit  = Math.min(Number(c.req.query("limit")  ?? 500), 2000);
+  const offset = Number(c.req.query("offset") ?? 0);
+
+  if (!["points", "lines", "polygons"].includes(table)) {
+    return c.json(badRequest("BAD_TABLE", "Invalid table"), 400);
+  }
+
+  const rows = await sql.unsafe(
+    `SELECT id::text, props
+     FROM ${table}
+     WHERE dataset_id = $1::uuid
+     ORDER BY id
+     LIMIT $2 OFFSET $3`,
+    [datasetId, limit, offset]
+  ) as any[];
+
+  const features = rows.map((r: any) => {
+    let rawProps = r.props ?? {};
+    if (typeof rawProps === "string") {
+      try { rawProps = JSON.parse(rawProps); } catch { rawProps = {}; }
+    }
+    return { id: r.id, properties: { ...rawProps, _fid: r.id } };
+  });
+
+  return c.json({ ok: true, features });
+});
+
 
 
 // GET /datasets/:datasetId/columns

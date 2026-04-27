@@ -16,6 +16,7 @@ const BASEMAP_OPTIONS: { id: string; label: string; preview: string }[] = [
   { id: "osm",            label: "OpenStreetMap",  preview: "#b5d0d0" },
 ];
 
+
 // ─── Basemap Picker ───────────────────────────────────────────────────────────
 function BasemapPicker({ forceOpen, onOpen, onClose }: {
   forceOpen?: boolean;
@@ -128,26 +129,89 @@ const T = {
 };
 
 
-// ─── Kepler-style palettes ────────────────────────────────────────────────────
 const KP_CAT: Record<string, string[]> = {
-  "Felt":    ["#e63946","#f4a261","#2a9d8f","#457b9d","#8338ec","#fb5607","#3a86ff","#06d6a0","#ffbe0b","#ff006e"],
-  "Tableau": ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac"],
-  "QGIS":   ["#1f78b4","#33a02c","#e31a1c","#ff7f00","#6a3d9a","#b15928","#a6cee3","#b2df8a","#fb9a99","#fdbf6f"],
-  "Pastel": ["#aec6cf","#ffb347","#b5ead7","#c7ceea","#ffdac1","#e2f0cb","#ff9aa2","#f8d9d9","#c4faf8","#dcd3ff"],
-  "Bold":   ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#999999","#66c2a5","#fc8d62"],
+  // ── Uber / Kepler branded ──────────────────────────────────────────────────
+  "Uber Viz Qualitative": ["#12939A","#DDB27C","#88572C","#FF991F","#F15C17","#223F9A","#DA70BF","#125C77","#4DC19C","#776E57","#17B8BE","#F6D18A","#B7885E","#FFCB99","#F89570","#829AE3","#E79FD5","#1E96BE","#89DAC1","#B3AD9E"],
+  "Tol Bright":     ["#4477AA","#EE6677","#228833","#CCBB44","#66CCEE","#AA3377","#BBBBBB"],
+  "Tol Vibrant":    ["#EE7733","#0077BB","#33BBEE","#EE3377","#CC3311","#009988","#BBBBBB"],
+  "Tol Muted":      ["#CC6677","#332288","#DDCC77","#117733","#88CCEE","#882255","#44AA99","#999933","#AA4499"],
+  "Tol Med Contrast":["#6699CC","#004488","#EECC66","#994455","#997700","#EE99AA"],
+  "Tol Light":      ["#77AADD","#EE8866","#EEDD88","#FFAABB","#99DDFF","#44BB99","#BBCC33","#AAAA00"],
+  "Okabe Ito":      ["#E69F00","#56B4E9","#009E73","#F0E442","#0072B2","#D55E00","#CC79A7","#000000"],
+  "FSQ Brand":      ["#3333FF","#6166EB","#2ED9C3","#82E8DB","#FCCC0A","#FFDAAF","#30A5D9","#97DAF8"],
+  "FSQ Warm":       ["#C00B05","#D150A5","#E98ECA","#FECE5A","#FFDDBF","#FFB4D3","#EE5D86","#D8D2D2"],
+  "FSQ Cool":       ["#11439F","#297EE8","#95C6C9","#FECE5A","#FFDDBF","#9FB1B7","#5281B5","#B9D0FB"],
+  // ── ColorBrewer qualitative ─────────────────────────────────────────────────
+  "Accent":  ["#7FC97F","#BEAED4","#FDC086","#FFFF99","#386CB0","#F0027F","#BF5B17","#666666"],
+  "Dark2":   ["#1B9E77","#D95F02","#7570B3","#E7298A","#66A61E","#E6AB02","#A6761D","#666666"],
+  "Paired":  ["#A6CEE3","#1F78B4","#B2DF8A","#33A02C","#FB9A99","#E31A1C","#FDBF6F","#FF7F00","#CAB2D6","#6A3D9A","#FFFF99","#B15928"],
+  "Pastel1": ["#FBB4AE","#B3CDE3","#CCEBC5","#DECBE4","#FED9A6","#FFFFCC","#E5D8BD","#FDDAEC","#F2F2F2"],
+  "Pastel2": ["#B3E2CD","#FDCDAC","#CBD5E8","#F4CAE4","#E6F5C9","#FFF2AE","#F1E2CC","#CCCCCC"],
+  "Set1":    ["#E41A1C","#377EB8","#4DAF4A","#984EA3","#FF7F00","#FFFF33","#A65628","#F781BF","#999999"],
+  "Set2":    ["#66C2A5","#FC8D62","#8DA0CB","#E78AC3","#A6D854","#FFD92F","#E5C494","#B3B3B3"],
+  "Set3":    ["#8DD3C7","#FFFFB3","#BEBADA","#FB8072","#80B1D3","#FDB462","#B3DE69","#FCCDE5","#D9D9D9","#BC80BD","#CCEBC5","#FFED6F"],
+  // ── D3 qualitative ──────────────────────────────────────────────────────────
+  "Tableau10":["#4E79A7","#F28E2B","#E15759","#76B7B2","#59A14F","#EDC948","#B07AA1","#FF9DA7","#9C755F","#BAB0AC"],
 };
 
 const KP_SEQ: Record<string, string[]> = {
-  "Viridis": ["#fde725","#7ad151","#22a884","#2a788e","#414487","#440154"],
-  "Plasma":  ["#f0f921","#fca636","#e16462","#b12a90","#6a00a8","#0d0887"],
-  "Blues":   ["#dbeafe","#93c5fd","#3b82f6","#1d4ed8","#1e3a8a"],
-  "Greens":  ["#dcfce7","#86efac","#22c55e","#15803d","#14532d"],
-  "Oranges": ["#fff7ed","#fed7aa","#fb923c","#ea580c","#7c2d12"],
-  "Reds":    ["#fef2f2","#fca5a5","#ef4444","#b91c1c","#450a0a"],
-  "Purples": ["#f5f3ff","#c4b5fd","#8b5cf6","#6d28d9","#3b0764"],
-  "Turbo":   ["#23171b","#4a58dd","#2af5b0","#a8fc3b","#fca50a","#bf3d1e"],
-  "Spectral":["#d53e4f","#f46d43","#fdae61","#ffffbf","#abdda4","#66c2a5","#3288bd"],
-  "RdYlGn": ["#d73027","#f46d43","#fee08b","#d9ef8b","#66bd63","#1a9850"],
+  // ── Uber/Kepler custom sequential ───────────────────────────────────────────
+  "Uber Viz Sequential": ["#00939C","#35BBC4","#78D6DA","#B5ECEE","#E6FAFA"],
+  "Global Warming":      ["#4C0035","#7E1C47","#AC1C17","#D45D15","#FFC300"],
+  "Sunrise":             ["#355C7D","#6C5B7B","#C06C84","#F67280","#F8B195"],
+  "Ocean Green":         ["#37535E","#2F8F83","#3EACA8","#8DCFC1","#E5EEC1"],
+  "Pink Wine":           ["#2C1E3D","#6B3E6B","#956485","#C29CA8","#EDD1CA"],
+  "Purple Blue Yellow":  ["#383C65","#3B6B8A","#49838A","#A3B59A","#D6DEBF"],
+  "VioletOcean":         ["#7400B8","#5E60CE","#4EA8DE","#56CFE1","#72EFDD"],
+  "SummerSky":           ["#184E77","#1E6F9A","#168AAD","#76C893","#D9ED92"],
+  "Uber Viz Diverging":  ["#00939C","#5EC9CE","#B7E9EB","#FEE8E0","#E4967B","#C22E00"],
+  "UberPool":            ["#223F9A","#7B30BC","#CF1750","#F0741E","#FAE300"],
+  "Ice And Fire":        ["#0198BD","#6DC4C6","#FAFEB3","#FDDB99","#E05375","#D50255"],
+  // ── ColorBrewer sequential (multi-hue) ──────────────────────────────────────
+  "BuGn":   ["#EDF8FB","#B2E2E2","#66C2A4","#2CA25F","#006D2C"],
+  "BuPu":   ["#EDF8FB","#B3CDE3","#8C96C6","#8856A7","#810F7C"],
+  "GnBu":   ["#F0F9E8","#BAE4BC","#7BCCC4","#43A2CA","#0868AC"],
+  "OrRd":   ["#FEF0D9","#FDCC8A","#FC8D59","#E34A33","#B30000"],
+  "PuBu":   ["#F1EEF6","#BDC9E1","#74A9CF","#2B8CBE","#045A8D"],
+  "PuBuGn": ["#F6EFF7","#BDC9E1","#67A9CF","#1C9099","#016C59"],
+  "PuRd":   ["#F1EEF6","#D7B5D8","#DF65B0","#DD1C77","#980043"],
+  "RdPu":   ["#FEEBE2","#FBB4B9","#F768A1","#C51B8A","#7A0177"],
+  "YlGn":   ["#FFFFCC","#C2E699","#78C679","#31A354","#006837"],
+  "YlGnBu": ["#FFFFD9","#C7E9B4","#41B6C4","#1D91C0","#225EA8","#0C2C84"],
+  "YlOrBr": ["#FFFFD4","#FED98E","#FE9929","#D95F0E","#993404"],
+  "YlOrRd": ["#FFFFB2","#FECC5C","#FD8D3C","#F03B20","#BD0026"],
+  // ── ColorBrewer sequential (single-hue) ─────────────────────────────────────
+  "Blues":   ["#EFF3FF","#BDD7E7","#6BAED6","#2171B5","#084594"],
+  "Greens":  ["#EDF8E9","#BAE4B3","#74C476","#31A354","#006D2C"],
+  "Greys":   ["#F7F7F7","#CCCCCC","#969696","#636363","#252525"],
+  "Oranges": ["#FFF5EB","#FDD0A2","#FDAE6B","#E6550D","#A63603"],
+  "Purples": ["#F2F0F7","#CBC9E2","#9E9AC8","#756BB1","#54278F"],
+  "Reds":    ["#FEE5D9","#FCAE91","#FB6A4A","#DE2D26","#A50F15"],
+  // ── ColorBrewer diverging ───────────────────────────────────────────────────
+  "BrBG":    ["#8C510A","#D8B365","#F6E8C3","#C7EAE5","#5AB4AC","#01665E"],
+  "PiYG":    ["#C51B7D","#E9A3C9","#FDE0EF","#E6F5D0","#A1D76A","#4D9221"],
+  "PRGn":    ["#762A83","#AF8DC3","#E7D4E8","#D9F0D3","#7FBF7B","#1B7837"],
+  "PuOr":    ["#B35806","#F1A340","#FEE0B6","#D8DAEB","#998EC3","#542788"],
+  "RdBu":    ["#B2182B","#EF8A62","#FDDBC7","#D1E5F0","#67A9CF","#2166AC"],
+  "RdGy":    ["#B2182B","#EF8A62","#FDDBC7","#FFFFFF","#BABABA","#404040"],
+  "RdYlBu":  ["#D73027","#FC8D59","#FEE090","#E0F3F8","#91BFDB","#4575B4"],
+  "RdYlGn":  ["#D73027","#FC8D59","#FEE08B","#D9EF8B","#91CF60","#1A9850"],
+  "Spectral":["#D53E4F","#F46D43","#FDAE61","#FEE08B","#E6F598","#ABDDA4","#66C2A5","#3288BD"],
+  // ── D3 sequential ───────────────────────────────────────────────────────────
+  "Viridis": ["#440154","#414487","#2A788E","#22A884","#7AD151","#FDE725"],
+  "Inferno": ["#000004","#420A68","#932667","#DD513A","#FCA50A","#F0F921"],
+  "Magma":   ["#000004","#3B0F70","#8C2981","#DE4968","#FE9F6D","#FCFDBF"],
+  "Plasma":  ["#0D0887","#6A00A8","#B12A90","#E16462","#FCA636","#F0F921"],
+  "Cividis": ["#00224E","#123570","#3B496C","#575D6D","#707173","#8A8678","#A59C74","#C3B369","#E1CC55","#FDE740"],
+  "Turbo":   ["#23171B","#4A58DD","#2AF5B0","#A8FC3B","#FCA50A","#BF3D1E"],
+  "Warm":    ["#6E40AA","#BE3888","#FE4B83","#FF7847","#E2B72F","#AADEA7"],
+  "Cool":    ["#6E40AA","#4C6EDB","#23ABD8","#1DDFA3","#52F667","#AADEA7"],
+  "Cubehelix":["#000000","#16546A","#2B9B60","#B4C83A","#EFAACC","#FFFFFF"],
+  "Sinebow": ["#FF4040","#E78D0B","#5AB82B","#0BB8E7","#7840FF","#FF4092"],
+  "Rainbow": ["#6E40AA","#BF3CBC","#F25192","#FF6B5E","#F7A720","#B6D428","#52F667","#1DDFA3","#23ABD8","#4C6EDB"],
+  // ── AmberPurple (user-requested) ─────────────────────────────────────────────
+  "AmberPurple": ["#ffd700","#ffab00","#ff6d00","#e53935","#880e4f","#4a148c"],
+  "YellowMaroon": ["#ffffa0","#f9d44a","#f0a500","#d4620a","#a82020","#6b0000"],
 };
 
 // ─── Colour palettes ──────────────────────────────────────────────────────────
@@ -207,13 +271,100 @@ function LayerSwatch({ type, color, size = 16 }: { type: string; color: string; 
 // ─── Layer Legend (symbology summary in layer list) ───────────────────────────
 function LayerLegend({ layer, ds }: { layer: any; ds: any }) {
   const sym = layer.symbology;
-  const hex = rgbToHex(layer.color);
+  const hex = Array.isArray(layer.color) ? rgbToHex(layer.color) : (layer.color ?? "#3b82f6");
+  const rc = (layer as any).radiusChannel;
+
+  if (rc?.field) {
+    const fieldMin = rc.fieldMin ?? 0;
+    const fieldMax = rc.fieldMax ?? 100;
+    const pxMin = (rc.range?.[0] ?? 2) * 0.25;
+    const pxMax = (rc.range?.[1] ?? 20) * 0.25;
+    const scale = 0.25;
+
+    // Compute pixel radius for a given data value using same formula as MapView
+    function dataToPx(val: number): number {
+      if (fieldMax === fieldMin) return pxMax;
+      if (rc.scale === "sqrt") {
+        const sqrtMin = Math.sqrt(Math.max(fieldMin, 0));
+        const sqrtMax = Math.sqrt(Math.max(fieldMax, sqrtMin + 0.001));
+        const sqrtVal = Math.sqrt(Math.max(val, 0));
+        const t = (sqrtVal - sqrtMin) / (sqrtMax - sqrtMin);
+        return pxMin + t * (pxMax - pxMin);
+      }
+      if (rc.scale === "log") {
+        const logMin = Math.log2(Math.max(fieldMin, 1));
+        const logMax = Math.log2(Math.max(fieldMax, 2));
+        const t = (Math.log2(Math.max(val, 1)) - logMin) / (logMax - logMin);
+        return pxMin + t * (pxMax - pxMin);
+      }
+      // linear
+      return pxMin + ((val - fieldMin) / (fieldMax - fieldMin)) * (pxMax - pxMin);
+    }
+
+    // Pick 4-5 nice round data values to show
+    const range = fieldMax - fieldMin;
+    const step = range > 200 ? 100 : range > 50 ? 50 : range > 20 ? 10 : range > 10 ? 5 : Math.max(1, Math.round(range / 4));
+    const stops: number[] = [];
+    stops.push(fieldMax);
+    let v = Math.floor(fieldMax / step) * step;
+    while (v > fieldMin && stops.length < 4) {
+      if (v < fieldMax) stops.push(v);
+      v -= step;
+    }
+    stops.push(fieldMin);
+    const uniqueStops = [...new Set(stops)].sort((a, b) => b - a);
+
+    const svgW = Math.max(pxMax * 2 + 8, 40);
+    const cx = svgW / 2;
+    const cy = svgW / 2;
+
+    return (
+      <div style={{ marginTop: 6, paddingLeft: 16, paddingRight: 8, paddingBottom: 6 }}>
+        {/* Field name */}
+        <span style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, fontFamily: T.font, letterSpacing: "0.04em", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+          {rc.field}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Concentric circles */}
+          <svg width={svgW} height={svgW} viewBox={`0 0 ${svgW} ${svgW}`} style={{ flexShrink: 0 }}>
+            {[...uniqueStops].reverse().map((val, i) => {
+              const r = Math.max(dataToPx(val), 1.5);
+              return (
+                <circle key={i}
+                  cx={cx} cy={cy} r={r}
+                  fill="none"
+                  stroke={hex}
+                  strokeWidth={1.2}
+                  opacity={1}
+                />
+              );
+            })}
+          </svg>
+          {/* Labels aligned to circle edges */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 0, justifyContent: "space-between", height: svgW }}>
+            {uniqueStops.map((val, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <div style={{ width: 10, height: 1, background: T.border, flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.font, fontVariantNumeric: "tabular-nums" }}>
+                  {val.toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!sym || sym.mode === "single") {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5, paddingLeft: 28 }}>
-        <LayerSwatch type={layer.type} color={hex} size={11} />
-        <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>Single symbol</span>
+        <div style={{
+          width: 13, height: 13, borderRadius: layer.type === "circle" ? "50%" : 3,
+          background: hex, border: `1.5px solid ${(layer as any).strokeColor ?? "rgba(0,0,0,0.15)"}`,
+          flexShrink: 0,
+        }}/>
+        <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>{hex.toUpperCase()}</span>
       </div>
     );
   }
@@ -223,11 +374,8 @@ function LayerLegend({ layer, ds }: { layer: any; ds: any }) {
       <div style={{ marginTop: 5, paddingLeft: 28, display: "flex", flexDirection: "column", gap: 3, maxHeight: 110, overflowY: "auto", scrollbarWidth: "thin" }}>
         {(sym.values as string[]).map((val: string, i: number) => (
           <div key={val} style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            <LayerSwatch type={layer.type} color={sym.colors[i % sym.colors.length]} size={11} />
-            <span style={{
-              fontSize: 11, color: T.textMuted, fontFamily: T.font,
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160,
-            }}>
+            <div style={{ width: 11, height: 11, borderRadius: layer.type === "circle" ? "50%" : 2, background: sym.colors[i % sym.colors.length], flexShrink: 0 }}/>
+            <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
               {val || "No Data"}
             </span>
           </div>
@@ -239,10 +387,7 @@ function LayerLegend({ layer, ds }: { layer: any; ds: any }) {
   if (sym.mode === "graduated" && sym.colors?.length) {
     return (
       <div style={{ marginTop: 5, paddingLeft: 28 }}>
-        <div style={{
-          height: 8, borderRadius: 4, width: "80%", maxWidth: 160,
-          background: `linear-gradient(to right, ${sym.colors.join(", ")})`,
-        }} />
+        <div style={{ height: 8, borderRadius: 4, width: "80%", maxWidth: 160, background: `linear-gradient(to right, ${sym.colors.join(", ")})` }} />
         <div style={{ display: "flex", justifyContent: "space-between", maxWidth: 160, marginTop: 2 }}>
           <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.font }}>{sym.min ?? 0}</span>
           <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.font }}>{sym.max ?? 100}</span>
@@ -319,6 +464,11 @@ function LayerContextMenu({
       icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4M6 7v5M10 7v5M3 4l1 9.5A.5.5 0 0 0 4.5 14h7a.5.5 0 0 0 .5-.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
       onClick: () => { onDelete(); onClose(); },
       danger: true,
+    },
+    {
+      label: "Rename layer",
+      icon: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3L11 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>,
+      onClick: () => { setRenamingId(layer.id); setRenameVal(layer.name); onClose(); },
     },
   ];
 
@@ -776,7 +926,7 @@ function LegendPanel({ onStyleLayer, onShowAttrTable, editMode }: {
   onShowAttrTable: (id: string) => void;
   editMode: boolean;
 }) {
-  const { layers, datasets, updateLayer, removeLayer, removeDataset, setZoomTarget } = useAppStore();
+  const { layers, datasets, updateLayer, removeLayer, removeDataset, setZoomTarget, reorderLayer } = useAppStore();
   const [minimized, setMinimized] = useState(false);
   const [tab, setTab] = useState<"layers"|"notes">("layers");
 
@@ -817,6 +967,7 @@ function LegendPanel({ onStyleLayer, onShowAttrTable, editMode }: {
                 updateLayer={updateLayer} removeLayer={removeLayer} removeDataset={removeDataset}
                 onStyleLayer={onStyleLayer} onShowAttrTable={onShowAttrTable}
                 editMode={editMode} setZoomTarget={setZoomTarget}
+                reorderLayer={reorderLayer}
               />
             : <NotesTab />
           }
@@ -827,10 +978,15 @@ function LegendPanel({ onStyleLayer, onShowAttrTable, editMode }: {
 }
 
 // ─── Layers Tab ───────────────────────────────────────────────────────────────
-function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, onStyleLayer, onShowAttrTable, editMode, setZoomTarget }: any) {
-  const [hovId, setHovId] = useState<string|null>(null);
-  const [deleting, setDeleting] = useState<string|null>(null);
-  const [ctxMenu, setCtxMenu] = useState<{ layerId: string; x: number; y: number } | null>(null);
+function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, onStyleLayer, onShowAttrTable, editMode, setZoomTarget, reorderLayer }: any) {
+  const [hovId, setHovId]           = useState<string|null>(null);
+  const [deleting, setDeleting]     = useState<string|null>(null);
+  const [ctxMenu, setCtxMenu]       = useState<{ layerId: string; x: number; y: number } | null>(null);
+  const [renamingId, setRenamingId] = useState<string|null>(null);
+  const [renameVal, setRenameVal]   = useState("");
+  const [dragIdx, setDragIdx]       = useState<number|null>(null);
+  const [dropIdx, setDropIdx]       = useState<number|null>(null);
+  const listRef = React.useRef<HTMLDivElement>(null);
 
   if (layers.length === 0) return (
     <div style={{ padding: "32px 16px", textAlign: "center", color: T.textLight, fontSize: 13, fontFamily: T.font }}>
@@ -858,11 +1014,47 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
     setZoomTarget({ longitude: lng, latitude: lat, zoom });
   }
 
+  // ── Pointer-based drag ────────────────────────────────────────────────────
+  function getRowIndexFromY(clientY: number): number {
+    if (!listRef.current) return -1;
+    const rows = Array.from(listRef.current.querySelectorAll("[data-layer-row]"));
+    for (let i = 0; i < rows.length; i++) {
+      const rect = rows[i].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return i;
+    }
+    return rows.length - 1;
+  }
+
+  function onHandlePointerDown(e: React.PointerEvent, fromIdx: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setDragIdx(fromIdx);
+    setDropIdx(fromIdx);
+  }
+
+  function onHandlePointerMove(e: React.PointerEvent) {
+    if (dragIdx === null) return;
+    const idx = getRowIndexFromY(e.clientY);
+    if (idx !== -1) setDropIdx(idx);
+  }
+
+  function onHandlePointerUp(e: React.PointerEvent) {
+    if (dragIdx !== null && dropIdx !== null && dragIdx !== dropIdx) {
+      reorderLayer(dragIdx, dropIdx);
+    }
+    setDragIdx(null);
+    setDropIdx(null);
+  }
+
   const ctxLayer = ctxMenu ? layers.find((l: any) => l.id === ctxMenu.layerId) : null;
   const ctxDs = ctxLayer ? datasets.find((d: any) => d.id === ctxLayer.datasetId) : null;
 
   return (
-    <div style={{ padding: "6px 0" }}>
+    <div ref={listRef} style={{ padding: "6px 0" }}
+      onPointerMove={dragIdx !== null ? onHandlePointerMove : undefined}
+      onPointerUp={dragIdx !== null ? onHandlePointerUp : undefined}
+    >
       {ctxMenu && ctxLayer && (
         <LayerContextMenu
           x={ctxMenu.x} y={ctxMenu.y}
@@ -872,37 +1064,64 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
           onStyle={() => onStyleLayer(ctxLayer.id)}
           onAttrTable={() => onShowAttrTable(ctxLayer.id)}
           onDelete={() => handleDelete(ctxLayer)}
+          onRename={() => { setRenamingId(ctxLayer.id); setRenameVal(ctxLayer.name); }}
         />
       )}
 
-      {layers.map((layer: any) => {
+      {layers.map((layer: any, idx: number) => {
         const ds = datasets.find((d: any) => d.id === layer.datasetId);
-        const hex = rgbToHex(layer.color);
+        const hex = Array.isArray(layer.color) ? rgbToHex(layer.color) : (layer.color ?? "#3b82f6");
         const isHov = hovId === layer.id;
         const isDeleting = deleting === layer.id;
+        const isDragging = dragIdx === idx;
+        const isDropTarget = dropIdx === idx && dragIdx !== null && dragIdx !== idx;
 
         return (
-          <div key={layer.id}
+          <div
+            key={layer.id}
+            data-layer-row={idx}
             onMouseEnter={() => setHovId(layer.id)}
             onMouseLeave={() => setHovId(null)}
             onContextMenu={(e) => {
               e.preventDefault();
-              const menuHeight = 36 + (editMode ? 4 : 5) * 37;
-              const y = e.clientY + menuHeight > window.innerHeight - 8
-                ? e.clientY - menuHeight   // flip up
-                : e.clientY;               // open down
+              const menuHeight = 36 + 6 * 37;
+              const y = e.clientY + menuHeight > window.innerHeight - 8 ? e.clientY - menuHeight : e.clientY;
               setCtxMenu({ layerId: layer.id, x: e.clientX, y });
             }}
             style={{
               padding: "8px 14px 10px",
-              background: isHov ? T.hover : "transparent",
+              background: isDropTarget ? "rgba(37,99,235,0.06)" : isHov ? T.hover : "transparent",
+              borderTop: isDropTarget ? `2px solid ${T.accent}` : "2px solid transparent",
               transition: "background 0.1s",
-              opacity: isDeleting ? 0.4 : 1,
+              opacity: isDeleting ? 0.4 : isDragging ? 0.45 : 1,
               borderBottom: `1px solid ${T.border}`,
+              userSelect: "none",
             }}
           >
-            {/* Row: eye toggle + name + ⋯ button */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {/* Row: drag handle + eye toggle + name + ⋯ */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+
+              {/* Drag handle */}
+              <div
+                onPointerDown={(e) => onHandlePointerDown(e, idx)}
+                style={{
+                  cursor: "grab", flexShrink: 0, color: T.textLight,
+                  opacity: isHov ? 1 : 0, transition: "opacity 0.15s",
+                  touchAction: "none", padding: "2px",
+                }}
+                title="Drag to reorder"
+              >
+                <svg width="12" height="14" viewBox="0 0 12 14" fill="none">
+                  <circle cx="3" cy="2"  r="1.3" fill="currentColor"/>
+                  <circle cx="3" cy="7"  r="1.3" fill="currentColor"/>
+                  <circle cx="3" cy="12" r="1.3" fill="currentColor"/>
+                  <circle cx="9" cy="2"  r="1.3" fill="currentColor"/>
+                  <circle cx="9" cy="7"  r="1.3" fill="currentColor"/>
+                  <circle cx="9" cy="12" r="1.3" fill="currentColor"/>
+                </svg>
+              </div>
+
+              {/* Eye toggle */}
               <button
                 onClick={() => updateLayer(layer.id, { visible: !layer.visible })}
                 style={{ background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 0, flexShrink: 0 }}
@@ -921,32 +1140,39 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
                 )}
               </button>
 
-              <span style={{
-                fontSize: 13, fontWeight: 500, flex: 1,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                color: layer.visible ? T.text : T.textLight, fontFamily: T.font,
-              }} title={layer.name}>
-                {layer.name}
-              </span>
+              {/* Name / rename input */}
+              {renamingId === layer.id ? (
+                <input
+                  autoFocus
+                  value={renameVal}
+                  onChange={e => setRenameVal(e.target.value)}
+                  onBlur={() => { if (renameVal.trim()) updateLayer(layer.id, { name: renameVal.trim() }); setRenamingId(null); }}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") { if (renameVal.trim()) updateLayer(layer.id, { name: renameVal.trim() }); setRenamingId(null); }
+                    if (e.key === "Escape") setRenamingId(null);
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  style={{ flex: 1, fontSize: 13, fontWeight: 500, fontFamily: T.font, border: `1.5px solid ${T.accent}`, borderRadius: 6, padding: "2px 6px", outline: "none", color: T.text, background: "white", minWidth: 0 }}
+                />
+              ) : (
+                <span
+                  onDoubleClick={() => { setRenamingId(layer.id); setRenameVal(layer.name); }}
+                  style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: layer.visible ? T.text : T.textLight, fontFamily: T.font, cursor: "text" }}
+                  title="Double-click to rename"
+                >
+                  {layer.name}
+                </span>
+              )}
 
+              {/* ⋯ menu button */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  const menuHeight = 36 + (editMode ? 4 : 5) * 37;
-                  setCtxMenu({
-                    layerId: layer.id,
-                    x: rect.right + 4,
-                    y: rect.bottom - menuHeight,  // bottom of menu aligns with button
-                  });
+                  const menuHeight = 36 + 6 * 37;
+                  setCtxMenu({ layerId: layer.id, x: rect.right + 4, y: rect.bottom - menuHeight });
                 }}
-                style={{
-                  opacity: isHov ? 1 : 0,
-                  transition: "opacity 0.15s",
-                  background: "none", border: "none", cursor: "pointer",
-                  padding: 4, borderRadius: 6, color: "#6b7280", flexShrink: 0,
-                  display: "flex", alignItems: "center",
-                }}
+                style={{ opacity: isHov ? 1 : 0, transition: "opacity 0.15s", background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 6, color: "#6b7280", flexShrink: 0, display: "flex", alignItems: "center" }}
                 title="Layer options"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -957,7 +1183,7 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
               </button>
             </div>
 
-            {/* Symbology legend */}
+            {/* Legend */}
             <LayerLegend layer={layer} ds={ds} />
           </div>
         );
@@ -1187,8 +1413,33 @@ function StyleDialog({ layerId, onClose }: { layerId: string; onClose: () => voi
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <LayerSwatch type={layer.type} color={hex} size={16}/>
-          <span style={{ fontSize: 13, fontWeight: 600, color: T.text, fontFamily: T.font, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{layer.name}</span>
+          <div style={{
+            width: 14, height: 14, borderRadius: layer.type === "circle" ? "50%" : 3, flexShrink: 0,
+            background: layer.symbology?.mode === "categorized"
+              ? (layer.symbology.colors?.[0] ?? hex)
+              : layer.symbology?.mode === "graduated"
+              ? (layer.symbology.colors?.[0] ?? hex)
+              : hex,
+            border: "1.5px solid rgba(0,0,0,0.12)",
+          }} />
+          <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: T.text, fontFamily: T.font, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{layer.name}</span>
+            {layer.symbology?.mode === "graduated" && layer.symbology?.colors?.length ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                <div style={{ width: 60, height: 4, borderRadius: 2, background: `linear-gradient(to right, ${layer.symbology.colors.join(", ")})` }} />
+                <span style={{ fontSize: 9, color: T.textLight, fontFamily: T.font }}>{layer.symbology.col}</span>
+              </div>
+            ) : layer.symbology?.mode === "categorized" && layer.symbology?.colors?.length ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 2, marginTop: 2 }}>
+                {layer.symbology.colors.slice(0, 5).map((c: string, i: number) => (
+                  <div key={i} style={{ width: 6, height: 6, borderRadius: 2, background: c }} />
+                ))}
+                <span style={{ fontSize: 9, color: T.textLight, fontFamily: T.font, marginLeft: 2 }}>{layer.symbology.col}</span>
+              </div>
+            ) : (
+              <span style={{ fontSize: 9, color: T.textLight, fontFamily: T.font }}>{hex.toUpperCase()}</span>
+            )}
+          </div>
         </div>
         <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
           <IconBtn onClick={() => setMinimized(!minimized)}>
@@ -1284,7 +1535,19 @@ function LayerStylePanel({ layer, updateLayer, allowedTypes, ds }: {
   const [radiusMin, setRadiusMin]     = useState<number>((layer.radiusChannel?.range?.[0]) ?? 2);
   const [radiusMax, setRadiusMax]     = useState<number>((layer.radiusChannel?.range?.[1]) ?? 20);
 
-  
+  const [radiusNumRange, setRadiusNumRange] = useState<[number, number]>([0, 100]);
+
+  useEffect(() => {
+    if (!dataset?.id || !radiusField) return;
+    fetch(`${API}/datasets/${dataset.id}/column-stats/${encodeURIComponent(radiusField)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok && data.min != null && data.max != null) {
+          setRadiusNumRange([Number(data.min), Number(data.max)]);
+        }
+      })
+      .catch(() => {});
+  }, [dataset?.id, radiusField]);
 
   const isNumericCol = colValues.length > 0 && colValues
     .filter(v => v !== "" && v !== "No Data")
@@ -1369,7 +1632,7 @@ function LayerStylePanel({ layer, updateLayer, allowedTypes, ds }: {
     if (isPoint) {
       updateLayer(layer.id, {
         radiusChannel: radiusField
-          ? { field: radiusField, scale: radiusScale as any, range: [radiusMin, radiusMax] }
+          ? { field: radiusField, scale: radiusScale as any, range: [radiusMin, radiusMax], fieldMin: radiusNumRange[0],fieldMax: radiusNumRange[1] }
           : null,
       });
     }
@@ -1516,11 +1779,18 @@ function LayerStylePanel({ layer, updateLayer, allowedTypes, ds }: {
                 <PaletteBar palettes={KP_SEQ} selected={rampPalette} onSelect={setRampPalette} inverted={inverted} onInvert={() => setInverted(v => !v)} />
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font, whiteSpace: "nowrap" }}>Classes</span>
-                  <input type="range" min={2} max={8} step={1} value={numClasses}
+                  <input type="range" min={2} max={20} step={1} value={numClasses}
                     onChange={e => { setNumClasses(Number(e.target.value)); setCustomBreaks(null); }}
                     style={{ flex: 1 }}
                   />
-                  <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font, width: 14, textAlign: "center" }}>{numClasses}</span>
+                  <input
+                    type="number" min={2} max={20} value={numClasses}
+                    onChange={e => {
+                      const v = Math.max(2, Math.min(20, Number(e.target.value)));
+                      if (Number.isFinite(v)) { setNumClasses(v); setCustomBreaks(null); }
+                    }}
+                    style={{ width: 44, fontSize: 11, fontWeight: 600, fontFamily: T.font, border: `1px solid ${T.border}`, borderRadius: 4, padding: "2px 4px", textAlign: "center", color: T.text, outline: "none" }}
+                  />
                 </div>
                 {activeBreaks.length >= 2 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -1532,12 +1802,64 @@ function LayerStylePanel({ layer, updateLayer, allowedTypes, ds }: {
                       return (
                         <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <div style={{ width: 12, height: 12, borderRadius: 2, background: swatch, flexShrink: 0, border: "1px solid rgba(0,0,0,0.1)" }}/>
-                          <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>
-                            {brk.toFixed(2)} – {activeBreaks[i + 1].toFixed(2)}
-                          </span>
+                          {i === 0 ? (
+                            <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>
+                              {brk.toFixed(2)} – {activeBreaks[i + 1].toFixed(2)}
+                            </span>
+                          ) : (
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <input
+                                type="text"
+                                key={`brk-${i}-${(customBreaks ?? autoBreaks)[i]}`}
+                                defaultValue={brk.toFixed(2)}
+                                onBlur={e => {
+                                  const val = Number(e.target.value);
+                                  if (!Number.isFinite(val)) return;
+                                  const next = [...(customBreaks ?? autoBreaks)];
+                                  next[i] = val;
+                                  setCustomBreaks(next);
+                                }}
+                                onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                style={{ width: 56, fontSize: 11, fontFamily: T.font, border: `1px solid ${T.border}`, borderRadius: 4, padding: "1px 5px", textAlign: "right", color: T.text, outline: "none" }}
+                              />
+                              <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>– {activeBreaks[i + 1].toFixed(2)}</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
+                    <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                      <button
+                        onClick={() => {
+                          const cur = customBreaks ?? autoBreaks;
+                          if (cur.length < 22) {
+                            const next = [...cur];
+                            next.splice(next.length - 1, 0, (next[next.length - 2] + next[next.length - 1]) / 2);
+                            setCustomBreaks(next);
+                            setNumClasses(next.length - 1);
+                          }
+                        }}
+                        style={{ flex: 1, padding: "4px 0", borderRadius: 6, border: `1px solid ${T.border}`, background: "white", fontSize: 11, fontFamily: T.font, cursor: "pointer", color: T.text }}
+                      >+ Add class</button>
+                      <button
+                        onClick={() => {
+                          const cur = customBreaks ?? autoBreaks;
+                          if (cur.length > 3) {
+                            const next = [...cur];
+                            next.splice(next.length - 2, 1);
+                            setCustomBreaks(next);
+                            setNumClasses(next.length - 1);
+                          }
+                        }}
+                        style={{ flex: 1, padding: "4px 0", borderRadius: 6, border: `1px solid ${T.border}`, background: "white", fontSize: 11, fontFamily: T.font, cursor: "pointer", color: T.text }}
+                      >− Remove class</button>
+                    </div>
+                    {customBreaks && (
+                      <button onClick={() => setCustomBreaks(null)}
+                        style={{ fontSize: 10, color: T.accent, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: T.font, textDecoration: "underline", textAlign: "left" }}>
+                        Reset to auto breaks
+                      </button>
+                    )}
                   </div>
                 )}
               </>
@@ -1546,7 +1868,7 @@ function LayerStylePanel({ layer, updateLayer, allowedTypes, ds }: {
         )}
 
         {/* ── OUTLINE ── */}
-        {layer.type !== "circle" && (
+        {true && (
           <>
             <SectionHeader
               label="Outline"
@@ -1648,30 +1970,144 @@ function LayerStylePanel({ layer, updateLayer, allowedTypes, ds }: {
             <SectionHeader label="Radius" open={openRadius} onToggle={() => setOpenRadius(o => !o)} />
             {openRadius && (
               <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+                
+                {/* ── Pixel radius (data-driven) ── */}
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>Pixel Radius</div>
                 <FieldRow
                   label="Field" columns={columns} colLoading={colLoading}
                   value={radiusField} onChange={setRadiusField}
                   scales={[{ key: "linear", label: "Linear" }, { key: "sqrt", label: "Sqrt" }, { key: "log", label: "Log" }]}
                   activeScale={radiusScale} onScaleChange={setRadiusScale}
                 />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Min px</div>
-                    <input type="number" min={1} max={50} value={radiusMin} onChange={e => setRadiusMin(Number(e.target.value))}
-                      style={{ width: "100%", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", boxSizing: "border-box" as const }}
-                    />
+                {radiusField && (
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: T.font }}>
+                    Data: {radiusNumRange[0].toLocaleString(undefined, {maximumFractionDigits: 1})} – {radiusNumRange[1].toLocaleString(undefined, {maximumFractionDigits: 1})}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Max px</div>
-                    <input type="number" min={1} max={200} value={radiusMax} onChange={e => setRadiusMax(Number(e.target.value))}
-                      style={{ width: "100%", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: T.font, color: T.text, outline: "none", boxSizing: "border-box" as const }}
-                    />
+                )}
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>Min px</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font }}>{radiusMin}</span>
                   </div>
+                  <input type="range" min={1} max={50} step={0.5} value={radiusMin}
+                    onChange={e => setRadiusMin(Math.min(Number(e.target.value), radiusMax - 1))}
+                    style={{ width: "100%", accentColor: T.text }}
+                  />
                 </div>
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>Max px</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font }}>{radiusMax}</span>
+                  </div>
+                  <input type="range" min={1} max={200} step={0.5} value={radiusMax}
+                    onChange={e => setRadiusMax(Math.max(Number(e.target.value), radiusMin + 1))}
+                    style={{ width: "100%", accentColor: T.text }}
+                  />
+                </div>
+
+                {/* ── Buffer radius (km) ── */}
+                <div style={{ height: 1, background: T.border, margin: "4px 0" }}/>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>Buffer Radius</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Toggle
+                    checked={(layer as any).bufferEnabled ?? false}
+                    onChange={v => updateLayer(layer.id, { bufferEnabled: v } as any)}
+                  />
+                  <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.font }}>Show buffer circle</span>
+                </div>
+                {(layer as any).bufferEnabled && (
+                  <>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>Radius (km)</span>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: T.text, fontFamily: T.font }}>{(layer as any).bufferKm ?? 1} km</span>
+                      </div>
+                      <input type="range" min={0.1} max={50} step={0.1}
+                        value={(layer as any).bufferKm ?? 1}
+                        onChange={e => updateLayer(layer.id, { bufferKm: Number(e.target.value) } as any)}
+                        style={{ width: "100%", accentColor: T.text }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {[0.5, 1, 2, 5, 10].map(km => (
+                        <button key={km} onClick={() => updateLayer(layer.id, { bufferKm: km } as any)}
+                          style={{
+                            flex: 1, padding: "4px 0", borderRadius: 6, border: `1px solid ${T.border}`,
+                            background: (layer as any).bufferKm === km ? T.accent : "white",
+                            color: (layer as any).bufferKm === km ? "white" : T.textMuted,
+                            fontSize: 10, fontWeight: 600, fontFamily: T.font, cursor: "pointer",
+                          }}>{km}km</button>
+                      ))}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Fill</div>
+                      <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                        <label style={{
+                          width: 28, height: 28, borderRadius: 6,
+                          background: (layer as any).bufferFillTransparent ? "transparent" : ((layer as any).bufferColorSolid ?? "#3b82f6"),
+                          border: `1.5px solid ${T.border}`, cursor: "pointer", position: "relative", display: "block",
+                          backgroundImage: (layer as any).bufferFillTransparent ? "linear-gradient(45deg,#ccc 25%,transparent 25%,transparent 75%,#ccc 75%),linear-gradient(45deg,#ccc 25%,transparent 25%,transparent 75%,#ccc 75%)" : "none",
+                          backgroundSize: "8px 8px", backgroundPosition: "0 0,4px 4px",
+                        }}>
+                          {!(layer as any).bufferFillTransparent && (
+                            <input type="color" value={(layer as any).bufferColorSolid ?? "#3b82f6"}
+                              onChange={e => updateLayer(layer.id, { bufferColorSolid: e.target.value } as any)}
+                              style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer" }}
+                            />
+                          )}
+                        </label>
+                        <button
+                          onClick={() => updateLayer(layer.id, { bufferFillTransparent: !((layer as any).bufferFillTransparent) } as any)}
+                          style={{
+                            fontSize: 10, fontWeight: 600, fontFamily: T.font, padding: "2px 7px",
+                            borderRadius: 5, border: `1px solid ${T.border}`, cursor: "pointer",
+                            background: (layer as any).bufferFillTransparent ? T.accent : "white",
+                            color: (layer as any).bufferFillTransparent ? "white" : T.textMuted,
+                          }}>None</button>
+                      </div>
+                    </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Stroke</div>
+                        <label style={{ width: 28, height: 28, borderRadius: 6, background: (layer as any).bufferStroke ?? "#3b82f6", border: `1.5px solid ${T.border}`, cursor: "pointer", position: "relative", display: "block" }}>
+                          <input type="color" value={(layer as any).bufferStroke ?? "#3b82f6"}
+                            onChange={e => updateLayer(layer.id, { bufferStroke: e.target.value } as any)}
+                            style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer" }}
+                          />
+                        </label>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        
+        {/* ── LABEL (points) ── */}
+        {isPoint && (
+          <>
+            <SectionHeader label="Label" open={(layer as any).labelEnabled ?? false} onToggle={() => {}} rightSlot={
+              <Toggle
+                checked={(layer as any).labelEnabled ?? false}
+                onChange={v => updateLayer(layer.id, { labelEnabled: v } as any)}
+              />
+            }/>
+            {(layer as any).labelEnabled && (
+              <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>Display field</div>
+                <select
+                  value={(layer as any).labelField ?? ""}
+                  onChange={e => updateLayer(layer.id, { labelField: e.target.value } as any)}
+                  style={{ border: `1px solid ${T.border}`, borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: T.font, color: T.text, background: "white", outline: "none" }}
+                >
+                  <option value="">— select field —</option>
+                  {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
               </div>
             )}
           </>
         )}
+
+
 
         {/* ── FILL OPACITY ── */}
         <SectionHeader label="Opacity" open={openOpacity} onToggle={() => setOpenOpacity(o => !o)} />
@@ -2675,7 +3111,7 @@ function AttributeTable({ layerId, onClose, editMode }: {
     if (!dataset) return;
     setLoading(true);
     setError(null);
-    fetch(`${API_BASE}/datasets/${dataset.id}/features?table=${table}`)
+    fetch(`${API_BASE}/datasets/${dataset.id}/features?table=${table}&limit=500`)
       .then((r) => r.json())
       .then((fc) => {
         const features = fc.features ?? [];
