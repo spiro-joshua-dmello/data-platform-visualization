@@ -978,16 +978,14 @@ function LegendPanel({ onStyleLayer, onShowAttrTable, editMode }: {
 }
 
 // ─── Layers Tab ───────────────────────────────────────────────────────────────
-function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, onStyleLayer, onShowAttrTable, editMode, setZoomTarget, reorderLayer }: any) {
-  const [hovId, setHovId]           = useState<string|null>(null);
-  const [deleting, setDeleting]     = useState<string|null>(null);
-  const [ctxMenu, setCtxMenu]       = useState<{ layerId: string; x: number; y: number } | null>(null);
+function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, onStyleLayer, onShowAttrTable, editMode, setZoomTarget }: any) {
+  const [hovId, setHovId] = useState<string|null>(null);
+  const [deleting, setDeleting] = useState<string|null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ layerId: string; x: number; y: number } | null>(null);
   const [renamingId, setRenamingId] = useState<string|null>(null);
   const [renameVal, setRenameVal]   = useState("");
-  const [dragIdx, setDragIdx]       = useState<number|null>(null);
-  const [dropIdx, setDropIdx]       = useState<number|null>(null);
-  const listRef = React.useRef<HTMLDivElement>(null);
-
+  const [dragIdx, setDragIdx]   = useState<number|null>(null);
+  const [dragOver, setDragOver] = useState<number|null>(null);
   if (layers.length === 0) return (
     <div style={{ padding: "32px 16px", textAlign: "center", color: T.textLight, fontSize: 13, fontFamily: T.font }}>
       <div style={{ fontSize: 28, marginBottom: 8 }}>🗺️</div>
@@ -1014,47 +1012,11 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
     setZoomTarget({ longitude: lng, latitude: lat, zoom });
   }
 
-  // ── Pointer-based drag ────────────────────────────────────────────────────
-  function getRowIndexFromY(clientY: number): number {
-    if (!listRef.current) return -1;
-    const rows = Array.from(listRef.current.querySelectorAll("[data-layer-row]"));
-    for (let i = 0; i < rows.length; i++) {
-      const rect = rows[i].getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) return i;
-    }
-    return rows.length - 1;
-  }
-
-  function onHandlePointerDown(e: React.PointerEvent, fromIdx: number) {
-    e.preventDefault();
-    e.stopPropagation();
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    setDragIdx(fromIdx);
-    setDropIdx(fromIdx);
-  }
-
-  function onHandlePointerMove(e: React.PointerEvent) {
-    if (dragIdx === null) return;
-    const idx = getRowIndexFromY(e.clientY);
-    if (idx !== -1) setDropIdx(idx);
-  }
-
-  function onHandlePointerUp(e: React.PointerEvent) {
-    if (dragIdx !== null && dropIdx !== null && dragIdx !== dropIdx) {
-      reorderLayer(dragIdx, dropIdx);
-    }
-    setDragIdx(null);
-    setDropIdx(null);
-  }
-
   const ctxLayer = ctxMenu ? layers.find((l: any) => l.id === ctxMenu.layerId) : null;
   const ctxDs = ctxLayer ? datasets.find((d: any) => d.id === ctxLayer.datasetId) : null;
 
   return (
-    <div ref={listRef} style={{ padding: "6px 0" }}
-      onPointerMove={dragIdx !== null ? onHandlePointerMove : undefined}
-      onPointerUp={dragIdx !== null ? onHandlePointerUp : undefined}
-    >
+    <div style={{ padding: "6px 0" }}>
       {ctxMenu && ctxLayer && (
         <LayerContextMenu
           x={ctxMenu.x} y={ctxMenu.y}
@@ -1064,64 +1026,62 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
           onStyle={() => onStyleLayer(ctxLayer.id)}
           onAttrTable={() => onShowAttrTable(ctxLayer.id)}
           onDelete={() => handleDelete(ctxLayer)}
-          onRename={() => { setRenamingId(ctxLayer.id); setRenameVal(ctxLayer.name); }}
         />
       )}
 
-      {layers.map((layer: any, idx: number) => {
+      {layers.map((layer: any) => {
         const ds = datasets.find((d: any) => d.id === layer.datasetId);
-        const hex = Array.isArray(layer.color) ? rgbToHex(layer.color) : (layer.color ?? "#3b82f6");
+        const hex = rgbToHex(layer.color);
         const isHov = hovId === layer.id;
         const isDeleting = deleting === layer.id;
-        const isDragging = dragIdx === idx;
-        const isDropTarget = dropIdx === idx && dragIdx !== null && dragIdx !== idx;
 
         return (
-          <div
-            key={layer.id}
-            data-layer-row={idx}
+          <div key={layer.id}
+            draggable
+            onDragStart={() => setDragIdx(layers.indexOf(layer))}
+            onDragOver={e => { e.preventDefault(); setDragOver(layers.indexOf(layer)); }}
+            onDrop={() => {
+              if (dragIdx !== null && dragOver !== null && dragIdx !== dragOver) {
+                reorderLayer(dragIdx, dragOver);
+              }
+              setDragIdx(null); setDragOver(null);
+            }}
+            onDragEnd={() => { setDragIdx(null); setDragOver(null); }}
             onMouseEnter={() => setHovId(layer.id)}
             onMouseLeave={() => setHovId(null)}
             onContextMenu={(e) => {
               e.preventDefault();
-              const menuHeight = 36 + 6 * 37;
-              const y = e.clientY + menuHeight > window.innerHeight - 8 ? e.clientY - menuHeight : e.clientY;
+              const menuHeight = 36 + (editMode ? 4 : 5) * 37;
+              const y = e.clientY + menuHeight > window.innerHeight - 8
+                ? e.clientY - menuHeight
+                : e.clientY;
               setCtxMenu({ layerId: layer.id, x: e.clientX, y });
             }}
             style={{
               padding: "8px 14px 10px",
-              background: isDropTarget ? "rgba(37,99,235,0.06)" : isHov ? T.hover : "transparent",
-              borderTop: isDropTarget ? `2px solid ${T.accent}` : "2px solid transparent",
+              background: dragOver === layers.indexOf(layer) && dragIdx !== layers.indexOf(layer)
+                ? "rgba(37,99,235,0.06)"
+                : isHov ? T.hover : "transparent",
+              borderTop: dragOver === layers.indexOf(layer) && dragIdx !== null && dragIdx !== layers.indexOf(layer)
+                ? `2px solid ${T.accent}` : "2px solid transparent",
               transition: "background 0.1s",
-              opacity: isDeleting ? 0.4 : isDragging ? 0.45 : 1,
+              opacity: isDeleting ? 0.4 : dragIdx === layers.indexOf(layer) ? 0.5 : 1,
               borderBottom: `1px solid ${T.border}`,
-              userSelect: "none",
             }}
           >
-            {/* Row: drag handle + eye toggle + name + ⋯ */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-
-              {/* Drag handle */}
-              <div
-                onPointerDown={(e) => onHandlePointerDown(e, idx)}
-                style={{
-                  cursor: "grab", flexShrink: 0, color: T.textLight,
-                  opacity: isHov ? 1 : 0, transition: "opacity 0.15s",
-                  touchAction: "none", padding: "2px",
-                }}
-                title="Drag to reorder"
-              >
-                <svg width="12" height="14" viewBox="0 0 12 14" fill="none">
-                  <circle cx="3" cy="2"  r="1.3" fill="currentColor"/>
-                  <circle cx="3" cy="7"  r="1.3" fill="currentColor"/>
-                  <circle cx="3" cy="12" r="1.3" fill="currentColor"/>
-                  <circle cx="9" cy="2"  r="1.3" fill="currentColor"/>
-                  <circle cx="9" cy="7"  r="1.3" fill="currentColor"/>
-                  <circle cx="9" cy="12" r="1.3" fill="currentColor"/>
+            {/* Row: drag handle + eye toggle + name + ⋯ button */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {/* Drag handle — appears on hover */}
+              <div style={{ color: T.textLight, cursor: "grab", flexShrink: 0, opacity: isHov ? 1 : 0, transition: "opacity 0.15s" }}>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <circle cx="5" cy="4" r="1.2" fill="currentColor"/>
+                  <circle cx="5" cy="8" r="1.2" fill="currentColor"/>
+                  <circle cx="5" cy="12" r="1.2" fill="currentColor"/>
+                  <circle cx="11" cy="4" r="1.2" fill="currentColor"/>
+                  <circle cx="11" cy="8" r="1.2" fill="currentColor"/>
+                  <circle cx="11" cy="12" r="1.2" fill="currentColor"/>
                 </svg>
               </div>
-
-              {/* Eye toggle */}
               <button
                 onClick={() => updateLayer(layer.id, { visible: !layer.visible })}
                 style={{ background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 0, flexShrink: 0 }}
@@ -1140,39 +1100,59 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
                 )}
               </button>
 
-              {/* Name / rename input */}
               {renamingId === layer.id ? (
-                <input
-                  autoFocus
-                  value={renameVal}
-                  onChange={e => setRenameVal(e.target.value)}
-                  onBlur={() => { if (renameVal.trim()) updateLayer(layer.id, { name: renameVal.trim() }); setRenamingId(null); }}
-                  onKeyDown={e => {
-                    if (e.key === "Enter") { if (renameVal.trim()) updateLayer(layer.id, { name: renameVal.trim() }); setRenamingId(null); }
-                    if (e.key === "Escape") setRenamingId(null);
-                  }}
-                  onClick={e => e.stopPropagation()}
-                  style={{ flex: 1, fontSize: 13, fontWeight: 500, fontFamily: T.font, border: `1.5px solid ${T.accent}`, borderRadius: 6, padding: "2px 6px", outline: "none", color: T.text, background: "white", minWidth: 0 }}
-                />
-              ) : (
-                <span
-                  onDoubleClick={() => { setRenamingId(layer.id); setRenameVal(layer.name); }}
-                  style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: layer.visible ? T.text : T.textLight, fontFamily: T.font, cursor: "text" }}
-                  title="Double-click to rename"
-                >
-                  {layer.name}
-                </span>
+                  <input
+                    autoFocus
+                    value={renameVal}
+                    onChange={e => setRenameVal(e.target.value)}
+                    onBlur={() => { if (renameVal.trim()) updateLayer(layer.id, { name: renameVal.trim() }); setRenamingId(null); }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") { if (renameVal.trim()) updateLayer(layer.id, { name: renameVal.trim() }); setRenamingId(null); }
+                      if (e.key === "Escape") setRenamingId(null);
+                    }}
+                    onClick={e => e.stopPropagation()}
+                    style={{
+                      flex: 1, fontSize: 13, fontWeight: 500, fontFamily: T.font,
+                      border: `1.5px solid ${T.accent}`, borderRadius: 6,
+                      padding: "2px 6px", outline: "none", color: T.text,
+                      background: "white", minWidth: 0,
+                    }}
+                  />
+                ) : (
+                  <span
+                    onDoubleClick={() => { setRenamingId(layer.id); setRenameVal(layer.name); }}
+                    style={{
+                      fontSize: 13, fontWeight: 500, flex: 1,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      color: layer.visible ? T.text : T.textLight, fontFamily: T.font, cursor: "text",
+                    }}
+                    title="Double-click to rename"
+                  >
+                    {layer.name}
+                  </span>
               )}
 
-              {/* ⋯ menu button */}
+
+
+
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  const menuHeight = 36 + 6 * 37;
-                  setCtxMenu({ layerId: layer.id, x: rect.right + 4, y: rect.bottom - menuHeight });
+                  const menuHeight = 36 + (editMode ? 4 : 5) * 37;
+                  setCtxMenu({
+                    layerId: layer.id,
+                    x: rect.right + 4,
+                    y: rect.bottom - menuHeight,  // bottom of menu aligns with button
+                  });
                 }}
-                style={{ opacity: isHov ? 1 : 0, transition: "opacity 0.15s", background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 6, color: "#6b7280", flexShrink: 0, display: "flex", alignItems: "center" }}
+                style={{
+                  opacity: isHov ? 1 : 0,
+                  transition: "opacity 0.15s",
+                  background: "none", border: "none", cursor: "pointer",
+                  padding: 4, borderRadius: 6, color: "#6b7280", flexShrink: 0,
+                  display: "flex", alignItems: "center",
+                }}
                 title="Layer options"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -1183,7 +1163,7 @@ function LayersTab({ layers, datasets, updateLayer, removeLayer, removeDataset, 
               </button>
             </div>
 
-            {/* Legend */}
+            {/* Symbology legend */}
             <LayerLegend layer={layer} ds={ds} />
           </div>
         );
@@ -2082,30 +2062,76 @@ function LayerStylePanel({ layer, updateLayer, allowedTypes, ds }: {
             </>
           )}
         
-        {/* ── LABEL (points) ── */}
-        {isPoint && (
-          <>
-            <SectionHeader label="Label" open={(layer as any).labelEnabled ?? false} onToggle={() => {}} rightSlot={
-              <Toggle
-                checked={(layer as any).labelEnabled ?? false}
-                onChange={v => updateLayer(layer.id, { labelEnabled: v } as any)}
-              />
-            }/>
-            {(layer as any).labelEnabled && (
-              <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase" }}>Display field</div>
+        
+        {/* ── LABEL ── */}
+        <>
+          <SectionHeader label="Label" open={(layer as any).labelEnabled ?? false} onToggle={() => {}} rightSlot={
+            <Toggle
+              checked={(layer as any).labelEnabled ?? false}
+              onChange={v => updateLayer(layer.id, { labelEnabled: v } as any)}
+            />
+          }/>
+          {(layer as any).labelEnabled && (
+            <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+
+              {/* Field picker */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Display field</div>
                 <select
                   value={(layer as any).labelField ?? ""}
                   onChange={e => updateLayer(layer.id, { labelField: e.target.value } as any)}
-                  style={{ border: `1px solid ${T.border}`, borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: T.font, color: T.text, background: "white", outline: "none" }}
+                  style={{ width: "100%", border: `1px solid ${T.border}`, borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: T.font, color: T.text, background: "white", outline: "none" }}
                 >
                   <option value="">— select field —</option>
                   {columns.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-            )}
-          </>
-        )}
+
+              {/* Font style */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Font style</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {(["regular", "bold", "italic"] as const).map(f => (
+                    <button key={f} onClick={() => updateLayer(layer.id, { labelFont: f } as any)}
+                      style={{
+                        flex: 1, padding: "4px 0", borderRadius: 6, border: `1px solid ${T.border}`, cursor: "pointer", fontSize: 11, fontFamily: T.font,
+                        fontWeight: f === "bold" ? 700 : 400,
+                        fontStyle: f === "italic" ? "italic" : "normal",
+                        background: ((layer as any).labelFont ?? "regular") === f ? T.accent : "white",
+                        color: ((layer as any).labelFont ?? "regular") === f ? "white" : T.text,
+                      }}>
+                      {f.charAt(0).toUpperCase() + f.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Font size */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>
+                  Size — {(layer as any).labelSize ?? 12}px
+                </div>
+                <input type="range" min={8} max={32} step={1}
+                  value={(layer as any).labelSize ?? 12}
+                  onChange={e => updateLayer(layer.id, { labelSize: Number(e.target.value) } as any)}
+                  style={{ width: "100%", accentColor: T.text }}
+                />
+              </div>
+
+              {/* Text color */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.textLight, fontFamily: T.font, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>Color</div>
+                <label style={{ width: 28, height: 28, borderRadius: 6, background: (layer as any).labelColor ?? "#111827", border: `1.5px solid ${T.border}`, cursor: "pointer", position: "relative", display: "block" }}>
+                  <input type="color" value={(layer as any).labelColor ?? "#111827"}
+                    onChange={e => updateLayer(layer.id, { labelColor: e.target.value } as any)}
+                    style={{ position: "absolute", opacity: 0, width: "100%", height: "100%", cursor: "pointer" }}
+                  />
+                </label>
+              </div>
+
+            </div>
+          )}
+        </>
 
 
 

@@ -1576,6 +1576,32 @@ export function MapView() {
 
                 const { rules: activeRules = [], matchMode = "AND" } = filterRules[dataset.id] ?? {};
                 const dsFilter = buildMapFilter(dataset.datasetId, activeRules);
+                
+                // ── Shared label layer (appended to any geometry type) ──
+                const labelLayer = ((layer as any).labelEnabled && (layer as any).labelField)
+                  ? <Layer key={`${layer.id}-label`} id={`${layer.id}-label`}
+                      type="symbol"
+                      source={`polygons-geojson-${dataset.id}`}
+                      minzoom={0} maxzoom={24}
+                      layout={{
+                        "text-field":  ["to-string", ["get", (layer as any).labelField]],
+                        "text-size":   (layer as any).labelSize ?? 12,
+                        "text-offset": [0, 1.4],
+                        "text-anchor": "top",
+                        "text-allow-overlap": true,
+                        "text-font": (layer as any).labelFont === "bold"
+                          ? ["Open Sans Bold", "Arial Unicode MS Bold"]
+                          : (layer as any).labelFont === "italic"
+                          ? ["Open Sans Italic", "Arial Unicode MS Regular"]
+                          : ["Open Sans Regular", "Arial Unicode MS Regular"],
+                      }}
+                      paint={{
+                        "text-color":      (layer as any).labelColor ?? "#111827",
+                        "text-halo-color": "#ffffff",
+                        "text-halo-width": 1.5,
+                      }}
+                    />
+                  : null;
 
                 if (layer.type === "circle") return [
                   <Layer key={layer.id} id={layer.id}
@@ -1627,6 +1653,7 @@ export function MapView() {
                       "circle-stroke-opacity": (layer as any).strokeOpacity ?? 1,
                     }}
                   />,
+                  ...(labelLayer ? [labelLayer] : []),
                 ];
 
                 if (layer.type === "line") return [
@@ -1640,6 +1667,7 @@ export function MapView() {
                       "line-width":   (layer as any).strokeWidth ?? 2,
                     }}
                   />,
+                  ...(labelLayer ? [labelLayer] : []),
                 ];
 
                 
@@ -1668,27 +1696,12 @@ export function MapView() {
                       }}
                     />
                   ]),
-                  ...(((layer as any).labelEnabled && (layer as any).labelField) ? [
-                    <Layer key={`${layer.id}-label`} id={`${layer.id}-label`}
-                      type="symbol"
-                      source={`polygons-geojson-${dataset.id}`}
-                      minzoom={0} maxzoom={24}
-                      layout={{
-                        "text-field": ["to-string", ["get", (layer as any).labelField]],
-                        "text-size": 11,
-                        "text-offset": [0, 1.2],
-                        "text-anchor": "top",
-                        "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-                      }}
-                      paint={{
-                        "text-color": "#111827",
-                        "text-halo-color": "#ffffff",
-                        "text-halo-width": 1.5,
-                      }}
-                    />
-                  ] : []),
+                  ...(labelLayer ? [labelLayer] : []),
                 ];
+
                 return [];
+
+
               })
           )}
 
