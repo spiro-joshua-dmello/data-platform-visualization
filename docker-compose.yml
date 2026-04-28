@@ -18,7 +18,8 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── 2. Run migrations (one-shot, exits when done) ────────────────────────────
+  # ── 2. Run migrations (separate operation — run manually before starting app) ─
+  # Usage: docker compose run --rm migrate
   migrate:
     image: postgis/postgis:16-3.4
     container_name: kepler-migrate
@@ -32,14 +33,16 @@ services:
     command: >
       psql -h db -U postgres -d kepler -f /migrations/001_init.sql
     restart: "no"
+    profiles:
+      - migrate
 
   # ── 3. Martin tile server ────────────────────────────────────────────────────
   martin:
     image: ghcr.io/maplibre/martin:v0.13.0
     container_name: kepler-martin
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/kepler
       RUST_LOG: info
@@ -61,8 +64,8 @@ services:
       dockerfile: Dockerfile
     container_name: kepler-upload
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/kepler
       MARTIN_BASE: http://martin:3000

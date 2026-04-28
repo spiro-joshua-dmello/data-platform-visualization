@@ -10,7 +10,7 @@ data-visualization-plat/
 ├── postgres/
 │   ├── martin.yaml                     ← Martin tile server config
 │   └── migrations/
-│       └── 001_init.sql                ← database schema (runs automatically)
+│       └── 001_init.sql                ← database schema (run separately)
 ├── kepler-backend/
 │   └── upload-service/
 │       ├── Dockerfile
@@ -66,23 +66,35 @@ The files generated alongside this guide need to be placed in the right location
 
 ## Starting the project
 
-From the project root, run:
+Migrations must be run before starting the app for the first time. See [Running migrations](#running-migrations) below.
+
+**Step 1 — start the database:**
+
+```bash
+docker compose up -d db
+```
+
+**Step 2 — run migrations:**
+
+```bash
+docker compose run --rm migrate
+```
+
+**Step 3 — start the rest of the stack:**
 
 ```bash
 docker compose up --build
 ```
 
-This single command does everything in order:
+This starts Martin, the upload API, and the frontend. The `--build` flag is needed on the first run (or after code changes). Subsequent starts are faster:
 
-1. Starts PostGIS and waits until it is healthy
-2. Runs `001_init.sql` — creates the PostGIS extension, all tables, and all indexes — then exits
-3. Starts Martin (tile server) once migrations complete
-4. Builds and starts the upload API
-5. Builds and starts the frontend
+```bash
+docker compose up
+```
 
 Once all services are up, open **http://localhost:5173** in your browser.
 
-> The first run takes a few minutes because Docker builds the upload service and frontend images. Subsequent starts are much faster.
+> The first build takes a few minutes because Docker builds the upload service and frontend images.
 
 ---
 
@@ -94,7 +106,7 @@ Check that all containers are healthy:
 docker compose ps
 ```
 
-You should see `db`, `martin`, `upload-service`, and `frontend` all running (the `migrate` container will show as `Exited (0)` — that is expected).
+You should see `db`, `martin`, `upload-service`, and `frontend` all running.
 
 Spot-check individual services:
 
@@ -127,24 +139,56 @@ docker compose down -v
 
 ---
 
-## Re-running migrations
+## Running migrations
 
-The migration script (`001_init.sql`) runs automatically on first boot when the `pg_data` volume is empty. It uses `CREATE TABLE IF NOT EXISTS` throughout, so it is safe to run again manually without destroying data:
+The `migrate` service is decoupled from the main stack and must be run explicitly. It is not started by `docker compose up`.
+
+### Running migrations
+
+Make sure the database is running first:
+
+```bash
+docker compose up -d db
+```
+
+Then run migrations:
 
 ```bash
 docker compose run --rm migrate
 ```
 
----
+`--rm` removes the container automatically when done. You'll see psql output confirming each statement. The command exits with code `0` on success.
 
-## Updating the schema
+**Verify the migration ran:**
 
-To add a new migration, create a new file in `postgres/migrations/` — for example `002_add_column.sql` — and update the `migrate` service command in `docker-compose.yml` to reference it, or chain both files:
+```bash
+docker exec -it kegler-postgis psql -U postgres -d kepler -c "\dt"
+```
+
+You should see `datasets`, `points`, `lines`, and `polygons` listed.
+
+### Re-running migrations
+
+The migration script uses `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS` throughout, so it is safe to run multiple times — it will not destroy or duplicate existing data:
+
+```bash
+docker compose run --rm migrate
+```
+
+### Adding a new migration
+
+Create a new file in `postgres/migrations/` — for example `002_add_column.sql` — then update the `migrate` service command in `docker-compose.yml` to chain both files:
 
 ```yaml
 command: >
   sh -c "psql -h db -U postgres -d kepler -f /migrations/001_init.sql &&
          psql -h db -U postgres -d kepler -f /migrations/002_add_column.sql"
+```
+
+Then apply it:
+
+```bash
+docker compose run --rm migrate
 ```
 
 ---
@@ -165,15 +209,10 @@ The ports used are `15432` (PostGIS), `3000` (Martin), `8787` (upload API), and 
 
 **Migrations did not run**
 
-If you see `relation "points" does not exist` errors from the upload service, the migrate container may have failed. Check its logs:
+If you see `relation "points" does not exist` errors from the upload service, migrations haven't been applied yet. Run them:
 
 ```bash
-docker compose logs migrate
-```
-
-Then re-run manually:
-
-```bash
+docker compose up -d db
 docker compose run --rm migrate
 ```
 
